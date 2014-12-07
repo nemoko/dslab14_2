@@ -8,9 +8,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.net.*;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.logging.Logger;
 
 public class Node implements INodeCli, Runnable {
 
@@ -36,8 +38,12 @@ public class Node implements INodeCli, Runnable {
 
     private Shell shell;
 
-    private static final Logger LOGGER
-            = Logger.getLogger(Node.class.getName());
+    private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
+        @Override
+        protected DateFormat initialValue() {
+            return new SimpleDateFormat("HH:mm:ss.SSS");
+        }
+    };
 
     /**
      * @param componentName
@@ -69,13 +75,13 @@ public class Node implements INodeCli, Runnable {
         try {
             udpServer = new DatagramSocket();
         } catch (SocketException ex) {
-            System.out.println("Der UDP Server konnte nicht gestartet werden");
+            write("Der UDP Server konnte nicht gestartet werden");
         }
 
         try {
             tcpServer = new ServerSocket(tcpPort);
         } catch (IOException ex) {
-            System.out.println("Der TCP Server konnte nicht gestartet werden");
+            write("Der TCP Server konnte nicht gestartet werden");
         }
 
         executor = Executors.newFixedThreadPool(10);
@@ -91,7 +97,7 @@ public class Node implements INodeCli, Runnable {
             public void run() {
                 try {
 
-                    System.out.println("TCP laeuft..");
+                    write("TCP läuft..");
 
                     while (!Thread.currentThread().isInterrupted()) {
 
@@ -111,7 +117,7 @@ public class Node implements INodeCli, Runnable {
             @Override
             public void run() {
 
-                System.out.println("UDP laeuft..");
+                write("UDP läuft..");
 
                 while (!Thread.currentThread().isInterrupted()) {
                     try {
@@ -181,6 +187,15 @@ public class Node implements INodeCli, Runnable {
         System.in.close();
 
         return "Node wurde  beendet";
+    }
+
+    /*
+     *   Schreibt direkt in die Konsole mit dem Format wie die Shell
+     *                 Zeit                              Text
+     *   Beispiel: 08:27:37.425		Die Verbindung zum Server war erfolgreich!
+     */
+    public void write(String write){
+        System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t" + write);
     }
 
     @Override

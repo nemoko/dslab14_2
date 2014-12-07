@@ -9,10 +9,13 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 
 /**
- * Created by tomi on 09.11.14.
+ * Ein Arbeiter, der sich um einen Client kümmert
  */
 public class CloudControllerWorker implements Runnable {
 
@@ -26,6 +29,13 @@ public class CloudControllerWorker implements Runnable {
     private PrintWriter out;
 
     private String logedInUser;
+
+    private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
+        @Override
+        protected DateFormat initialValue() {
+            return new SimpleDateFormat("HH:mm:ss.SSS");
+        }
+    };
 
     public CloudControllerWorker(Socket socket, ArrayList<NodeInfo> nodes, ArrayList<ClientInfo> clients) {
         this.socket = socket;
@@ -132,6 +142,8 @@ public class CloudControllerWorker implements Runnable {
     /*
      *  Eine Anfrage besteht aus !type ...
      *  Das !type wird zurückgegeben
+     *
+     *  type ist zum Beispiel: login, logout,..
      */
     private String getType(String inputLine) {
         if(inputLine != null) {
@@ -159,9 +171,9 @@ public class CloudControllerWorker implements Runnable {
 
                     logedInUser = username;
 
-                    System.out.println(username + " wurde eingelogt");
+                    write(username + " wurde eingeloggt");
 
-                    return "Anmeldung erfolgreich: success!";
+                    return "Anmeldung erfolgreich!";
                 }
             }
         } catch (Exception ex) {
@@ -182,15 +194,18 @@ public class CloudControllerWorker implements Runnable {
 
     private void logoutClient() {
 
-        if (logedInUser != null) {
-            for (ClientInfo client : clients) {
-                if (client.getName().equals(logedInUser)) {
-                    client.setOnline(false);
-                }
-            }
+        synchronized (clients) {
 
-            System.out.println(logedInUser + " wurde abgemeldet");
-            logedInUser = null;
+            if (logedInUser != null) {
+                for (ClientInfo client : clients) {
+                    if (client.getName().equals(logedInUser)) {
+                        client.setOnline(false);
+                    }
+                }
+
+                write(logedInUser + " wurde ausgeloggt");
+                logedInUser = null;
+            }
         }
     }
 
@@ -269,7 +284,7 @@ public class CloudControllerWorker implements Runnable {
                 NodeInfo node = FindOnlineServerWithMinimalUsageAndApropriateOperator(operator);
 
                 if (node == null) {
-                    return "Es gibt keinen verfügbaren Server zum berechnen ihrer Rechnung!\nBitte versuchen Sie es später nocheinmal.";
+                    return "Es gibt keinen verfügbaren Server zum berechnen ihrer Rechnung! Bitte versuchen Sie es später nocheinmal.";
                 } else {
                     String response = makeRequest(node, "compute " + firstNumber + " " + operator + " " + secondNumber);
                     if(response.startsWith("Error")) return response;
@@ -293,20 +308,23 @@ public class CloudControllerWorker implements Runnable {
 
     private NodeInfo FindOnlineServerWithMinimalUsageAndApropriateOperator(String operator) {
 
-        for (NodeInfo node : nodes) {
-            node.updateNode();
-        }
+        synchronized (nodes) {
 
-        NodeInfo minimum = null;
+            for (NodeInfo node : nodes) {
+                node.updateNode();
+            }
 
-        for (NodeInfo node : nodes) {
-            if(node.getOperators().contains(operator)) {
-                if (((minimum == null) && node.isOnline()) || ((minimum != null) && node.isOnline() && (minimum.getUsage() > node.getUsage()))) {
-                    minimum = node;
+            NodeInfo minimum = null;
+
+            for (NodeInfo node : nodes) {
+                if (node.getOperators().contains(operator)) {
+                    if (((minimum == null) && node.isOnline()) || ((minimum != null) && node.isOnline() && (minimum.getUsage() > node.getUsage()))) {
+                        minimum = node;
+                    }
                 }
             }
+            return minimum;
         }
-        return minimum;
     }
 
     private void setUserCredits(long creditsAfterCountings){
@@ -329,6 +347,9 @@ public class CloudControllerWorker implements Runnable {
         }
     }
 
+    /*
+     * Es wird eine Verbinung zu einem Node mit der Anfrage request aufgebaut
+     */
     public String makeRequest(NodeInfo node, String request){
 
         Socket s  = null;
@@ -347,10 +368,10 @@ public class CloudControllerWorker implements Runnable {
                 out.println(request);
                 response = in.readLine();
             } else {
-                System.out.println("Es konnte keine Verbindung zu " + node.getAdress().getHostAddress() + ":" + node.getPort() + " gemacht werden");
+                write("Es konnte keine Verbindung zu " + node.getAdress().getHostAddress() + ":" + node.getPort() + " gemacht werden");
             }
         } catch (IOException err) {
-            System.out.println("Es konnte keine Verbindung zu " + node.getAdress().getHostAddress() + ":" + node.getPort() + " gemacht werden");
+            write("Es konnte keine Verbindung zu " + node.getAdress().getHostAddress() + ":" + node.getPort() + " gemacht werden");
         }
 
         if(response == null) return "";
@@ -367,6 +388,11 @@ public class CloudControllerWorker implements Runnable {
         return amount;
     }
 
+    /*
+     * Diese Methode liefert nur die erste Zahl zurück
+     *
+     * wenn zum Beispiel input "15 + 5" ist, dann wird 15 zurückgeliefert
+     */
     public String getNumberFromBeginning(String input ) {
         if(input != null && !input.trim().equals("")) {
             String zahl = "";
@@ -378,6 +404,10 @@ public class CloudControllerWorker implements Runnable {
         } else return "";
     }
 
+    /*
+     * true wenn input Integer ist
+     * false wenn input kein Integer ist
+     */
     public static boolean isInteger( String input ) {
         try {
             Integer.parseInt( input );
@@ -386,5 +416,14 @@ public class CloudControllerWorker implements Runnable {
         catch( Exception e ) {
             return false;
         }
+    }
+
+    /*
+     *   Schreibt direkt in die Konsole mit dem Format wie die Shell
+     *                 Zeit                              Text
+     *   Beispiel: 08:27:37.425		Die Verbindung zum Server war erfolgreich!
+     */
+    public void write(String write){
+        System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t" + write);
     }
 }

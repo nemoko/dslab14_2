@@ -7,10 +7,12 @@ import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 
 /**
- * Created by tomi on 10.11.14.
+ * Ein Arbeiter, der sich um eine Anfrage vom Server kümmert
  */
 public class NodeWorker implements Runnable{
 
@@ -21,6 +23,13 @@ public class NodeWorker implements Runnable{
 
     private BufferedReader in;
     private PrintWriter out;
+
+    private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
+        @Override
+        protected DateFormat initialValue() {
+            return new SimpleDateFormat("HH:mm:ss.SSS");
+        }
+    };
 
     public NodeWorker(Socket socket, String logDir, String operators, String name) {
         this.socket = socket;
@@ -65,7 +74,7 @@ public class NodeWorker implements Runnable{
                     out.println("Keine richtige Anfrage");
                 }
         } catch (IOException ex) {
-            System.out.println("Es kam zu einem Fehler. Die Verbindung wird beendet");
+            write("Es kam zu einem Fehler. Die Verbindung wird beendet");
         }
         finally {
             try {
@@ -80,13 +89,18 @@ public class NodeWorker implements Runnable{
 
                 return;
             } catch (IOException ex) {
-                System.out.println(ex.getMessage());
+                System.err.println(ex.getMessage());
             } catch (Exception ex) {
-                System.out.println(ex.getMessage());
+                System.err.println(ex.getMessage());
             }
         }
     }
 
+    /*
+     * Eine Berechnung wird durchgeführt.
+     *
+     * Zum Beispiel 55 + 10
+     */
     private String compute(String compute) {
         if(compute == null || compute.equals("")) return "Error: Das Format zu berechnen stimmt nicht";
 
@@ -145,15 +159,24 @@ public class NodeWorker implements Runnable{
         }
     }
 
+    /*
+     * Erzeugt einen oder mehrere Ordner
+     */
     public void create(String path) {
         new File(path).mkdirs();
     }
 
+    /*
+     * Kontrolliert, ob es bereits diesen Pfad gibt
+     */
     public boolean exist(String path) {
         Path p = Paths.get(path);
         return Files.exists(p);
     }
 
+    /*
+     * Eine Logdate wird erstellt
+     */
     public void writing(String path, String text) {
         try {
             File statText = new File(path);
@@ -163,15 +186,23 @@ public class NodeWorker implements Runnable{
             w.write(text);
             w.close();
         } catch (IOException e) {
-            System.err.println("Es gab ein Problem beim Schreiben in die Datei!");
+            write("Es gab ein Problem beim Schreiben in die Datei!");
         }
     }
 
+    /*
+     * Kontrolliert, ob diese Node mit dem Operator rechnen kann
+     */
     private boolean checkIfCorrectOperator(String operator) {
         if(operator == null || operator.equals("")) return false;
         return operators.contains(operator);
     }
 
+    /*
+     * Diese Methode liefert nur die erste Zahl zurück
+     *
+     * wenn zum Beispiel input "15 + 5" ist, dann wird 15 zurückgeliefert
+     */
     public String getNumberFromBeginning(String input ) {
         if(input != null && !input.trim().equals("")) {
             String zahl = "";
@@ -183,6 +214,10 @@ public class NodeWorker implements Runnable{
         } else return "";
     }
 
+    /*
+     * true wenn input Integer ist
+     * false wenn input kein Integer ist
+     */
     public static boolean isInteger( String input ) {
         try {
             Integer.parseInt( input );
@@ -191,6 +226,15 @@ public class NodeWorker implements Runnable{
         catch( Exception e ) {
             return false;
         }
+    }
+
+    /*
+     *   Schreibt direkt in die Konsole mit dem Format wie die Shell
+     *                 Zeit                              Text
+     *   Beispiel: 08:27:37.425		Die Verbindung zum Server war erfolgreich!
+     */
+    public void write(String write){
+        System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t" + write);
     }
 
     /*

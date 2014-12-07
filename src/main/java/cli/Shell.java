@@ -32,7 +32,7 @@ public class Shell implements Runnable, Closeable {
 	private String name;
 
 	private ShellCommandInvocationHandler invocationHandler = new ShellCommandInvocationHandler();
-	private Map<String, ShellCommandDefinition> commandMap = new ConcurrentHashMap<>();
+	private Map<String, ShellCommandDefinition> commandMap = new ConcurrentHashMap<String, ShellCommandDefinition>();
 	private ConversionService conversionService = new DefaultConversionService();
 
 	private OutputStream out;

@@ -6,7 +6,7 @@ import java.net.InetAddress;
 import java.util.Date;
 
 /**
- * Created by tomi on 08.11.14.
+ * Informationen über ein Node
  */
 public class NodeInfo {
 

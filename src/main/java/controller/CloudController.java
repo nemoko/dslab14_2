@@ -9,6 +9,8 @@ import util.Config;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.Charset;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +37,14 @@ public class CloudController implements ICloudControllerCli, Runnable {
 
     private ArrayList<NodeInfo> nodes;
     private ArrayList<ClientInfo> clients;
+    private ArrayList<Socket> sockets;
+
+    private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
+        @Override
+        protected DateFormat initialValue() {
+            return new SimpleDateFormat("HH:mm:ss.SSS");
+        }
+    };
 
     /**
      * @param componentName
@@ -56,6 +66,7 @@ public class CloudController implements ICloudControllerCli, Runnable {
         shell = new Shell(componentName, userRequestStream, userResponseStream);
         shell.register(this);
 
+        sockets = new ArrayList<Socket>();
         nodes = new ArrayList<NodeInfo>();
 
         tcpPort = this.config.getInt("tcp.port");
@@ -80,11 +91,11 @@ public class CloudController implements ICloudControllerCli, Runnable {
                 try {
                     udpServer = new DatagramSocket(udpPort);
 
-                    System.out.println("UDP Server laeuft..");
+                    write("UDP Server läuft..");
 
                     byte[] data = new byte[17];
 
-                    while (true) {
+                    while (!udpServer.isClosed()) {
                         DatagramPacket packet = new DatagramPacket(data, data.length);
 
                         udpServer.receive(packet);
@@ -110,11 +121,13 @@ public class CloudController implements ICloudControllerCli, Runnable {
                 try {
                     tcpServer = new ServerSocket(tcpPort);
 
-                    System.out.println("TCP Server laeuft..");
+                    write("TCP Server läuft..");
 
-                    while (true) {
-                        Runnable pw = new CloudControllerWorker(tcpServer.accept(), nodes, clients);
+                    while (!tcpServer.isClosed()) {
+                        Socket socket = tcpServer.accept();
+                        Runnable pw = new CloudControllerWorker(socket, nodes, clients);
 
+                        sockets.add(socket);
                         executor.execute(pw);
                     }
                 } catch (IOException ex) {
@@ -124,24 +137,29 @@ public class CloudController implements ICloudControllerCli, Runnable {
         }).start();
     }
 
+    /*
+     * Jedes Mal, wenn der UDP Server ein Packet bekommt, wird die Nodes Liste aktualisiert
+     */
     private void updateNodeList(InetAddress address, int port, String operators) {
 
-        boolean exists = false;
+        synchronized (nodes) {
 
-        for (NodeInfo node : nodes) {
-            if (node.getPort() == port) {
-                node.setLastSignOfLive(new Date());
-                node.setOnline(true);
-                exists = true;
+            boolean exists = false;
+
+            for (NodeInfo node : nodes) {
+                if (node.getPort() == port) {
+                    node.setLastSignOfLive(new Date());
+                    node.setOnline(true);
+                    exists = true;
+                } else node.updateNode();
             }
-            else node.updateNode();
-        }
 
-        if (!exists) nodes.add(new NodeInfo(port, address, operators, 0, new Date(), true));
+            if (!exists) nodes.add(new NodeInfo(port, address, operators, 0, new Date(), true));
+        }
     }
 
     /*
-     * User befuellen von user.properties
+     * Client Liste befüllen von user.properties
      */
     private void loadUsers() {
         clients = new ArrayList<ClientInfo>();
@@ -184,32 +202,39 @@ public class CloudController implements ICloudControllerCli, Runnable {
     @Override
     @Command
     public String nodes() throws IOException {
-        String result = "";
-        int counter = 1;
 
-        for(NodeInfo node : nodes){
-            node.updateNode();
-            result += counter + ". " + node + "\n";
-            counter++;
+        synchronized (nodes) {
+
+            String result = "";
+            int counter = 1;
+
+            for (NodeInfo node : nodes) {
+                node.updateNode();
+                result += counter + ". " + node + "\n";
+                counter++;
+            }
+
+            if (result.equals("")) return "Es gibt keine Nodes";
+            return result;
         }
-
-        if(result.equals("")) return "Es gibt keine Nodes";
-        return result;
     }
 
     @Override
     @Command
     public String users() throws IOException {
-        String result = "";
-        int counter = 1;
+        synchronized (clients) {
 
-        for(ClientInfo user : clients){
-            result += counter + ". " + user + "\n";
-            counter++;
+            String result = "";
+            int counter = 1;
+
+            for (ClientInfo user : clients) {
+                result += counter + ". " + user + "\n";
+                counter++;
+            }
+
+            if (result.equals("")) return "Es gibt keine Users";
+            return result;
         }
-
-        if(result.equals("")) return "Es gibt keine Users";
-        return result;
     }
 
     @Override
@@ -218,6 +243,10 @@ public class CloudController implements ICloudControllerCli, Runnable {
         try {
 
             executor.shutdownNow();
+
+            for(Socket socket : sockets){
+                socket.close();
+            }
 
             if (!clients.isEmpty()) {
                 for (ClientInfo user : clients) {
@@ -236,7 +265,7 @@ public class CloudController implements ICloudControllerCli, Runnable {
             return "Controller beendet";
         } catch (IOException ex) {
             System.out.println(ex.getMessage());
-            return "Ein Fehler ist aufgetretten beim beenden";
+            return "Ein Fehler beim Beenden ist aufgetretten";
         } finally {
 
             if (shell != null) {
@@ -245,6 +274,15 @@ public class CloudController implements ICloudControllerCli, Runnable {
 
             System.in.close();
         }
+    }
+
+    /*
+     *   Schreibt direkt in die Konsole mit dem Format wie die Shell
+     *                 Zeit                              Text
+     *   Beispiel: 08:27:37.425		Die Verbindung zum Server war erfolgreich!
+     */
+    public void write(String write){
+        System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t" + write);
     }
 
     /**

@@ -7,6 +7,9 @@ import util.Config;
 import java.io.*;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 public class Client implements IClientCli, Runnable {
 
@@ -28,6 +31,13 @@ public class Client implements IClientCli, Runnable {
     private static Socket socket;
     private BufferedReader in;
     private PrintWriter out;
+
+    private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
+        @Override
+        protected DateFormat initialValue() {
+            return new SimpleDateFormat("HH:mm:ss.SSS");
+        }
+    };
 
     /**
      * @param componentName
@@ -69,42 +79,18 @@ public class Client implements IClientCli, Runnable {
                 out = new PrintWriter(socket.getOutputStream(), true);
             }
 
-            System.out.println("Verbindung erfolgreich aufgebaut. Bitte schreiben Sie einen Befehlt");
+            write("Die Verbindung zum Server war erfolgreich!");
         } catch (UnknownHostException ex) {
-            System.out.println("Unbekannter host: " + host);
+            write("Unbekannter host: " + host);
 
         } catch (IOException err) {
-            System.out.println("Es konnte keine Verbindung zu " + host + ":" + tcpPort + " aufgebaut werden");
-
+            write("Es konnte keine Verbindung zu " + host + ":" + tcpPort + " aufgebaut werden");
         }
     }
 
-    public String makeRequest(String request){
-        String response = "";
-
-        try {
-            if (socket!=null && socket.isConnected()) {
-                out.println(request);
-                response = in.readLine();
-            } else {
-                System.out.println("Es konnte keine Verbindung zu " + host + ":" + tcpPort + " aufgebaut werden");
-                Reconnect();
-            }
-        } catch (UnknownHostException err) {
-            System.out.println("Unbekannter host: " + host);
-        } catch (IOException err) {
-            System.out.println("Unbekannter host: " + host);
-            try {
-                Reconnect();
-            } catch (IOException e) {
-
-            }
-        }
-
-        if(response == null) return "";
-        return response;
-    }
-
+    /*
+     * Wenn die Verbindung ausfällt, wird versucht eine neue aufzubauen
+     */
     public String Reconnect() throws IOException {
         try {
             if(socket!=null) socket.close();
@@ -118,10 +104,42 @@ public class Client implements IClientCli, Runnable {
                 out = new PrintWriter(socket.getOutputStream(), true);
             }
         } catch (IOException e) {
-            return "Die Verbindung zum Server wurde getrennt. Die Wiederverbindung funktioniert nicht!";
+            return "Die Verbindung zum Server konnte nicht hergestellt werden!";
 
         }
-        return "Die Wiederverbindung funktioniert. Bitte verbinden Sie sich nocheinmal";
+        return "Die Verbindung zum Server war erfolgreich!";
+    }
+
+    /*
+     * Der Parameter request wird an den Server per TCP geschickt
+     */
+    public String makeRequest(String request){
+        String response = "";
+
+        try {
+            if(socket == null){
+                write(Reconnect());
+            }
+
+            if (socket != null && socket.isConnected()) {
+                out.println(request);
+                response = in.readLine();
+            }
+        } catch (UnknownHostException err) {
+            write("Unbekannter host: " + host);
+        } catch (IOException err) {
+            try {
+                write(Reconnect());
+
+                if (socket != null && socket.isConnected()) {
+                    out.println(request);
+                    response = in.readLine();
+                }
+            } catch (IOException e) {}
+        }
+
+        if(response == null) return "";
+        return response;
     }
 
     @Override
@@ -178,6 +196,15 @@ public class Client implements IClientCli, Runnable {
         } catch (Exception err) {
             return err.getMessage();
         }
+    }
+
+    /*
+     *   Schreibt direkt in die Konsole mit dem Format wie die Shell
+     *                 Zeit                              Text
+     *   Beispiel: 08:27:37.425		Die Verbindung zum Server war erfolgreich!
+     */
+    public void write(String write){
+        System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t" + write);
     }
 
     /**

@@ -1,7 +1,7 @@
 package client;
 
 /**
- * Created by tomi on 08.11.14.
+ * Informationen über Client
  */
 public class ClientInfo {
 
