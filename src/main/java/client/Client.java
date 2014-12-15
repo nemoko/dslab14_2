@@ -24,7 +24,6 @@ public class Client implements IClientCli, Runnable {
     private Shell shell;
 
     private String loggedInUser = null;
-    private long credits;
 
     private static String host;
     private static int tcpPort;
@@ -146,13 +145,22 @@ public class Client implements IClientCli, Runnable {
     @Command
     public String login(String username, String password) throws IOException {
 
-        return makeRequest("login " + username + " " + password);
+        if(loggedInUser == null) {
+            String response = makeRequest("login " + username + " " + password);
+            if (response.contains("erfolgreich")) loggedInUser = username;
+            return response;
+        } else if(!loggedInUser.equals(username)){
+            return "Sie müssen sich zuerst ausloggen um sich neu einloggen zu können";
+        } else {
+            return "Sie sind bereits eingeloggt!";
+        }
     }
 
     @Override
     @Command
     public String logout() throws IOException {
 
+        loggedInUser = null;
         return makeRequest("logout");
     }
 
