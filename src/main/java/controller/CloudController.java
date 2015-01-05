@@ -23,6 +23,7 @@ import java.security.Key;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -386,8 +387,42 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 	@Override
 	public List<ComputationRequestInfo> getLogs() throws RemoteException {
-		// TODO Auto-generated method stub
-		return null;
+		userResponseStream.println("CloudController method getLogs was invocated");
+		
+		List<ComputationRequestInfo> requestInfos = new ArrayList<ComputationRequestInfo>();
+		
+		for(NodeInfo nodeInfo : nodes) {
+			if (nodeInfo.isOnline()) {
+				Socket socket;
+				try {
+					socket = new Socket(nodeInfo.getAdress(), nodeInfo.getPort());
+				
+					// create a writer to send messages to the
+					// server
+					PrintWriter nodeServerWriter = new PrintWriter(socket.getOutputStream(), true);
+					nodeServerWriter.println("!getLogs");
+					
+					ObjectInputStream inputStream = new ObjectInputStream(socket.getInputStream());
+					List<ComputationRequestInfo> nodeRequestInfo = (List<ComputationRequestInfo>) inputStream.readObject();
+					requestInfos.addAll(nodeRequestInfo);
+					
+					socket.close();
+					
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (ClassNotFoundException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				
+				
+			}
+		}
+		
+		Collections.sort(requestInfos);
+		
+		return requestInfos;
 	}
 
 	@Override
