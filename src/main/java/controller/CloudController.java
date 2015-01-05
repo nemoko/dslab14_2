@@ -1,299 +1,411 @@
 package controller;
 
+import admin.INotificationCallback;
 import cli.Command;
 import cli.Shell;
 import client.ClientInfo;
+import model.ComputationRequestInfo;
 import node.NodeInfo;
 import util.Config;
 
 import java.io.*;
 import java.net.*;
 import java.nio.charset.Charset;
+import java.rmi.AccessException;
+import java.rmi.AlreadyBoundException;
+import java.rmi.NoSuchObjectException;
+import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
+import java.rmi.server.UnicastRemoteObject;
+import java.security.Key;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class CloudController implements ICloudControllerCli, Runnable {
-
-    private String componentName;
-    private Config config;
-    private InputStream userRequestStream;
-    private PrintStream userResponseStream;
-
-    private Shell shell;
-
-    private int tcpPort;
-    private int udpPort;
-    private ServerSocket tcpServer;
-    private DatagramSocket udpServer;
-
-    public static int nodeTimeout;
-    public int nodeCheckPeriod;
-
-    static ExecutorService executor;
-
-    private ArrayList<NodeInfo> nodes;
-    private ArrayList<ClientInfo> clients;
-    private ArrayList<Socket> sockets;
-
-    private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
-        @Override
-        protected DateFormat initialValue() {
-            return new SimpleDateFormat("HH:mm:ss.SSS");
-        }
-    };
-
-    /**
-     * @param componentName
-     *            the name of the component - represented in the prompt
-     * @param config
-     *            the configuration to use
-     * @param userRequestStream
-     *            the input stream to read user input from
-     * @param userResponseStream
-     *            the output stream to write the console output to
-     */
-    public CloudController(String componentName, Config config,
-                           InputStream userRequestStream, PrintStream userResponseStream) {
-        this.componentName = componentName;
-        this.config = config;
-        this.userRequestStream = userRequestStream;
-        this.userResponseStream = userResponseStream;
-
-        shell = new Shell(componentName, userRequestStream, userResponseStream);
-        shell.register(this);
-
-        sockets = new ArrayList<Socket>();
-        nodes = new ArrayList<NodeInfo>();
-
-        tcpPort = this.config.getInt("tcp.port");
-        udpPort = this.config.getInt("udp.port");
-        nodeTimeout = this.config.getInt("node.timeout");
-        nodeCheckPeriod = this.config.getInt("node.checkPeriod");
-
-        executor = Executors.newFixedThreadPool(10);
-    }
-
-    @Override
-    public void run() {
-
-        new Thread(shell).start();
-
-        loadUsers();
-
-        //UDP
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    udpServer = new DatagramSocket(udpPort);
-
-                    write("UDP Server läuft..");
-
-                    byte[] data = new byte[17];
-
-                    while (!udpServer.isClosed()) {
-                        DatagramPacket packet = new DatagramPacket(data, data.length);
-
-                        udpServer.receive(packet);
-
-                        String response = new String(packet.getData());
-
-                        if(response.startsWith("!alive")) {
-
-                            updateNodeList(packet.getAddress(), Integer.parseInt(response.substring(7, 12).trim()), response.substring(13).trim());
-                        }
-                    }
-                } catch (IOException ex) {
-
-                    System.out.println(ex.getMessage());
-                }
-            }
-        }).start();
-
-        //TCP
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    tcpServer = new ServerSocket(tcpPort);
-
-                    write("TCP Server läuft..");
-
-                    while (!tcpServer.isClosed()) {
-                        Socket socket = tcpServer.accept();
-                        Runnable pw = new CloudControllerWorker(socket, nodes, clients);
-
-                        sockets.add(socket);
-                        executor.execute(pw);
-                    }
-                } catch (IOException ex) {
-                    System.out.println(ex.getMessage());
-                }
-            }
-        }).start();
-    }
-
-    /*
-     * Jedes Mal, wenn der UDP Server ein Packet bekommt, wird die Nodes Liste aktualisiert
-     */
-    private void updateNodeList(InetAddress address, int port, String operators) {
-
-        synchronized (nodes) {
-
-            boolean exists = false;
-
-            for (NodeInfo node : nodes) {
-                if (node.getPort() == port) {
-                    node.setLastSignOfLive(new Date());
-                    node.setOnline(true);
-                    exists = true;
-                } else node.updateNode();
-            }
-
-            if (!exists) nodes.add(new NodeInfo(port, address, operators, 0, new Date(), true));
-        }
-    }
-
-    /*
-     * Client Liste befüllen von user.properties
-     */
-    private void loadUsers() {
-        clients = new ArrayList<ClientInfo>();
-
-        URL url = ClassLoader.getSystemClassLoader().getResource("user.properties");
-
-        ArrayList<String> zeilen = new ArrayList<String>();
-
-        try {
-            Charset charset = Charset.defaultCharset();
-
-            BufferedReader lineReader = new BufferedReader(new InputStreamReader(url.openStream(), charset));
-
-            try {
-                for (String line; ((line = lineReader.readLine()) != null); ) {
-                    zeilen.add(line);
-                }
-            } finally {
-                lineReader.close();
-            }
-        } catch (IOException ex) {
-            System.out.println(ex.getMessage());
-        }
-
-        for (String zeile : zeilen) {
-            if (zeile.contains("credits")) {
-
-                String username = zeile.substring(0, zeile.indexOf('.'));
-                Integer credits  = Integer.parseInt(zeile.substring(zeile.indexOf('=') + 1).trim());
-
-                ClientInfo user = new ClientInfo(username, credits, false);
-
-                if (!clients.contains(user)) {
-                    clients.add(user);
-                }
-            }
-        }
-    }
-
-    @Override
-    @Command
-    public String nodes() throws IOException {
-
-        synchronized (nodes) {
-
-            String result = "";
-            int counter = 1;
-
-            for (NodeInfo node : nodes) {
-                node.updateNode();
-                result += counter + ". " + node + "\n";
-                counter++;
-            }
-
-            if (result.equals("")) return "Es gibt keine Nodes";
-            return result;
-        }
-    }
-
-    @Override
-    @Command
-    public String users() throws IOException {
-        synchronized (clients) {
-
-            String result = "";
-            int counter = 1;
-
-            for (ClientInfo user : clients) {
-                result += counter + ". " + user + "\n";
-                counter++;
-            }
-
-            if (result.equals("")) return "Es gibt keine Users";
-            return result;
-        }
-    }
-
-    @Override
-    @Command
-    public String exit() throws IOException {
-        try {
-
-            executor.shutdownNow();
-
-            for(Socket socket : sockets){
-                socket.close();
-            }
-
-            if (!clients.isEmpty()) {
-                for (ClientInfo user : clients) {
-                    user.setOnline(false);
-                }
-            }
-
-            if (udpServer != null) {
-                udpServer.close();
-            }
-
-            if (tcpServer != null) {
-                tcpServer.close();
-            }
-
-            return "Controller beendet";
-        } catch (IOException ex) {
-            System.out.println(ex.getMessage());
-            return "Ein Fehler beim Beenden ist aufgetretten";
-        } finally {
-
-            if (shell != null) {
-                shell.close();
-            }
-
-            System.in.close();
-        }
-    }
-
-    /*
-     *   Schreibt direkt in die Konsole mit dem Format wie die Shell
-     *                 Zeit                              Text
-     *   Beispiel: 08:27:37.425		Die Verbindung zum Server war erfolgreich!
-     */
-    public void write(String write){
-        System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t" + write);
-    }
-
-    /**
-     * @param args
-     *            the first argument is the name of the {@link CloudController}
-     *            component
-     */
-    public static void main(String[] args) {
-        CloudController cloudController = new CloudController(args[0], new Config("controller"), System.in, System.out);
-        //CloudController cloudController = new CloudController("CloudController", new Config("controller"), System.in, System.out);
-
-        cloudController.run();
-    }
+public class CloudController implements ICloudControllerCli, Runnable,
+		IAdminConsole {
+
+	private String componentName;
+	private Config config;
+	private InputStream userRequestStream;
+	private PrintStream userResponseStream;
+
+	private Shell shell;
+
+	private int tcpPort;
+	private int udpPort;
+	private ServerSocket tcpServer;
+	private DatagramSocket udpServer;
+
+	public static int nodeTimeout;
+	public int nodeCheckPeriod;
+
+	static ExecutorService executor;
+
+	private ArrayList<NodeInfo> nodes;
+	private ArrayList<ClientInfo> clients;
+	private ArrayList<Socket> sockets;
+
+	private Registry registry;
+
+	private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
+		@Override
+		protected DateFormat initialValue() {
+			return new SimpleDateFormat("HH:mm:ss.SSS");
+		}
+	};
+
+	/**
+	 * @param componentName
+	 *            the name of the component - represented in the prompt
+	 * @param config
+	 *            the configuration to use
+	 * @param userRequestStream
+	 *            the input stream to read user input from
+	 * @param userResponseStream
+	 *            the output stream to write the console output to
+	 */
+	public CloudController(String componentName, Config config,
+			InputStream userRequestStream, PrintStream userResponseStream) {
+		this.componentName = componentName;
+		this.config = config;
+		this.userRequestStream = userRequestStream;
+		this.userResponseStream = userResponseStream;
+
+		shell = new Shell(componentName, userRequestStream, userResponseStream);
+		shell.register(this);
+
+		sockets = new ArrayList<Socket>();
+		nodes = new ArrayList<NodeInfo>();
+
+		tcpPort = this.config.getInt("tcp.port");
+		udpPort = this.config.getInt("udp.port");
+		nodeTimeout = this.config.getInt("node.timeout");
+		nodeCheckPeriod = this.config.getInt("node.checkPeriod");
+
+		executor = Executors.newFixedThreadPool(10);
+	}
+
+	@Override
+	public void run() {
+
+		new Thread(shell).start();
+
+		loadUsers();
+
+		// UDP
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					udpServer = new DatagramSocket(udpPort);
+
+					write("UDP Server läuft..");
+
+					byte[] data = new byte[17];
+
+					while (!udpServer.isClosed()) {
+						DatagramPacket packet = new DatagramPacket(data,
+								data.length);
+
+						udpServer.receive(packet);
+
+						String response = new String(packet.getData());
+
+						if (response.startsWith("!alive")) {
+
+							updateNodeList(packet.getAddress(),
+									Integer.parseInt(response.substring(7, 12)
+											.trim()), response.substring(13)
+											.trim());
+						}
+					}
+				} catch (IOException ex) {
+
+					System.out.println(ex.getMessage());
+				}
+			}
+		}).start();
+
+		// TCP
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					tcpServer = new ServerSocket(tcpPort);
+
+					write("TCP Server läuft..");
+
+					while (!tcpServer.isClosed()) {
+						Socket socket = tcpServer.accept();
+						Runnable pw = new CloudControllerWorker(socket, nodes,
+								clients);
+
+						sockets.add(socket);
+						executor.execute(pw);
+					}
+				} catch (IOException ex) {
+					System.out.println(ex.getMessage());
+				}
+			}
+		}).start();
+
+		//RMI
+		try {
+			// create and export the registry instance on localhost at the
+			// specified port
+			registry = LocateRegistry.createRegistry(config
+					.getInt("controller.rmi.port"));
+
+			// create a remote object of this cloudcontroller object
+			IAdminConsole remote = (IAdminConsole) UnicastRemoteObject
+					.exportObject(this, 0);
+
+			// bind the obtained remote object on specified binding name in the
+			// registry
+			registry.bind(config.getString("binding.name"), remote);
+
+		} catch (RemoteException e1) {
+			e1.printStackTrace();
+		} catch (AlreadyBoundException e) {
+			e.printStackTrace();
+		}
+
+	}
+
+	/*
+	 * Jedes Mal, wenn der UDP Server ein Packet bekommt, wird die Nodes Liste
+	 * aktualisiert
+	 */
+	private void updateNodeList(InetAddress address, int port, String operators) {
+
+		synchronized (nodes) {
+
+			boolean exists = false;
+
+			for (NodeInfo node : nodes) {
+				if (node.getPort() == port) {
+					node.setLastSignOfLive(new Date());
+					node.setOnline(true);
+					exists = true;
+				} else
+					node.updateNode();
+			}
+
+			if (!exists)
+				nodes.add(new NodeInfo(port, address, operators, 0, new Date(),
+						true));
+		}
+	}
+
+	/*
+	 * Client Liste befüllen von user.properties
+	 */
+	private void loadUsers() {
+		clients = new ArrayList<ClientInfo>();
+
+		URL url = ClassLoader.getSystemClassLoader().getResource(
+				"user.properties");
+
+		ArrayList<String> zeilen = new ArrayList<String>();
+
+		try {
+			Charset charset = Charset.defaultCharset();
+
+			BufferedReader lineReader = new BufferedReader(
+					new InputStreamReader(url.openStream(), charset));
+
+			try {
+				for (String line; ((line = lineReader.readLine()) != null);) {
+					zeilen.add(line);
+				}
+			} finally {
+				lineReader.close();
+			}
+		} catch (IOException ex) {
+			System.out.println(ex.getMessage());
+		}
+
+		for (String zeile : zeilen) {
+			if (zeile.contains("credits")) {
+
+				String username = zeile.substring(0, zeile.indexOf('.'));
+				Integer credits = Integer.parseInt(zeile.substring(
+						zeile.indexOf('=') + 1).trim());
+
+				ClientInfo user = new ClientInfo(username, credits, false);
+
+				if (!clients.contains(user)) {
+					clients.add(user);
+				}
+			}
+		}
+	}
+
+	@Override
+	@Command
+	public String nodes() throws IOException {
+
+		synchronized (nodes) {
+
+			String result = "";
+			int counter = 1;
+
+			for (NodeInfo node : nodes) {
+				node.updateNode();
+				result += counter + ". " + node + "\n";
+				counter++;
+			}
+
+			if (result.equals(""))
+				return "Es gibt keine Nodes";
+			return result;
+		}
+	}
+
+	@Override
+	@Command
+	public String users() throws IOException {
+		synchronized (clients) {
+
+			String result = "";
+			int counter = 1;
+
+			for (ClientInfo user : clients) {
+				result += counter + ". " + user + "\n";
+				counter++;
+			}
+
+			if (result.equals(""))
+				return "Es gibt keine Users";
+			return result;
+		}
+	}
+
+	@Override
+	@Command
+	public String exit() throws IOException {
+		try {
+
+			executor.shutdownNow();
+
+			for (Socket socket : sockets) {
+				socket.close();
+			}
+
+			if (!clients.isEmpty()) {
+				for (ClientInfo user : clients) {
+					user.setOnline(false);
+				}
+			}
+
+			if (udpServer != null) {
+				udpServer.close();
+			}
+
+			if (tcpServer != null) {
+				tcpServer.close();
+			}
+
+			return "Controller beendet";
+		} catch (IOException ex) {
+			System.out.println(ex.getMessage());
+			return "Ein Fehler beim Beenden ist aufgetretten";
+		} finally {
+
+			unbindRegistry();
+
+			if (shell != null) {
+				shell.close();
+			}
+
+			System.in.close();
+		}
+	}
+
+	private void unbindRegistry() {
+
+		try {
+			// unexport the previously exported remote object
+			UnicastRemoteObject.unexportObject(this, true);
+
+		} catch (NoSuchObjectException e) {
+			e.printStackTrace();
+		}
+
+		try {
+			// unbind the remote object so that a client can't find it anymore
+			registry.unbind(config.getString("binding.name"));
+		} catch (AccessException e) {
+			e.printStackTrace();
+		} catch (RemoteException e) {
+			e.printStackTrace();
+		} catch (NotBoundException e) {
+			e.printStackTrace();
+		}
+
+	}
+
+	/*
+	 * Schreibt direkt in die Konsole mit dem Format wie die Shell Zeit Text
+	 * Beispiel: 08:27:37.425 Die Verbindung zum Server war erfolgreich!
+	 */
+	public void write(String write) {
+		System.out.println(DATE_FORMAT.get().format(new Date()) + "\t\t"
+				+ write);
+	}
+
+	/**
+	 * @param args
+	 *            the first argument is the name of the {@link CloudController}
+	 *            component
+	 */
+	public static void main(String[] args) {
+		CloudController cloudController = new CloudController(args[0],
+				new Config("controller"), System.in, System.out);
+		// CloudController cloudController = new
+		// CloudController("CloudController", new Config("controller"),
+		// System.in, System.out);
+
+		cloudController.run();
+	}
+
+	@Override
+	public boolean subscribe(String username, int credits,
+			INotificationCallback callback) throws RemoteException {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+	@Override
+	public List<ComputationRequestInfo> getLogs() throws RemoteException {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	public LinkedHashMap<Character, Long> statistics() throws RemoteException {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	public Key getControllerPublicKey() throws RemoteException {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	public void setUserPublicKey(String username, byte[] key)
+			throws RemoteException {
+		// TODO Auto-generated method stub
+
+	}
 }
