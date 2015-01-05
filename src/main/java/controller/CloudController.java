@@ -24,9 +24,13 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -49,6 +53,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	public int nodeCheckPeriod;
 
 	static ExecutorService executor;
+	
+	private INotificationCallback notificationCallback;
 
 	private ArrayList<NodeInfo> nodes;
 	private ArrayList<ClientInfo> clients;
@@ -385,8 +391,9 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	@Override
 	public boolean subscribe(String username, int credits,
 			INotificationCallback callback) throws RemoteException {
-		// TODO Auto-generated method stub
-		return false;
+		this.notificationCallback = callback;
+		
+		return true;
 	}
 
 	@Override
@@ -395,7 +402,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		
 		List<ComputationRequestInfo> requestInfos = new ArrayList<ComputationRequestInfo>();
 		
-		for(NodeInfo nodeInfo : nodes) {
+		for(NodeInfo nodeInfo : getNodes()) {
 			if (nodeInfo.isOnline()) {
 				Socket socket;
 				try {
@@ -448,7 +455,23 @@ public class CloudController implements ICloudControllerCli, Runnable,
 //			
 //		}
 		
-		return operatorStatistics;
+		List<Map.Entry<Character, Long>> entries = new LinkedList<Map.Entry<Character, Long>>(operatorStatistics.entrySet());
+		Collections.sort(entries, new Comparator<Map.Entry<Character, Long>>() {
+
+			@Override
+			public int compare(Entry<Character, Long> arg0,
+					Entry<Character, Long> arg1) {
+				return -arg0.getValue().compareTo(arg1.getValue());
+			}
+        });
+		
+		LinkedHashMap<Character, Long> sortedMap = new LinkedHashMap<>();
+		
+		for(Map.Entry<Character, Long> entry: entries) {
+			sortedMap.put(entry.getKey(), entry.getValue());
+		}
+		
+		return sortedMap;
 	}
 
 	@Override
@@ -476,5 +499,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		return clients;
 	}
 	
+	public INotificationCallback getNotificationCallback() {
+		return notificationCallback;
+	}
 	
 }

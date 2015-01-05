@@ -163,9 +163,9 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 			INotificationCallback callback) throws RemoteException {
 		
 		// create a remote object of INotificationCallback object
-		INotificationCallback notCallback = (INotificationCallback) UnicastRemoteObject.exportObject(callback, 0);
+		INotificationCallback notifCallback = (INotificationCallback) UnicastRemoteObject.exportObject(callback, 0);
 		
-		return remoteInterface.subscribe("username", 500, notCallback);
+		return remoteInterface.subscribe("username", 500, notifCallback);
 	}
 
 	@Override
