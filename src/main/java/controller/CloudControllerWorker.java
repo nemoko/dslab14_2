@@ -11,7 +11,6 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
 
 /**
@@ -22,8 +21,8 @@ public class CloudControllerWorker implements Runnable {
     private Config config;
 
     private Socket socket;
-    private ArrayList<NodeInfo> nodes;
-    private ArrayList<ClientInfo> clients;
+    
+    private CloudController cloudController;
 
     private BufferedReader in;
     private PrintWriter out;
@@ -37,10 +36,9 @@ public class CloudControllerWorker implements Runnable {
         }
     };
 
-    public CloudControllerWorker(Socket socket, ArrayList<NodeInfo> nodes, ArrayList<ClientInfo> clients) {
+    public CloudControllerWorker(Socket socket, CloudController cloudController) {
         this.socket = socket;
-        this.nodes = nodes;
-        this.clients = clients;
+        this.cloudController = cloudController;
 
         try {
             in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
@@ -158,8 +156,8 @@ public class CloudControllerWorker implements Runnable {
         String password = input.substring(input.indexOf(" ") + 1).trim();
 
         try {
-            for (int i = 0; i < clients.size(); i++) {
-                ClientInfo user = clients.get(i);
+            for (int i = 0; i < cloudController.getClients().size(); i++) {
+                ClientInfo user = cloudController.getClients().get(i);
 
                 if ((user.getName().trim().compareToIgnoreCase(username) == 0)
                         && (password.compareTo(config.getString(username.concat(".password"))) == 0)) {
@@ -194,10 +192,10 @@ public class CloudControllerWorker implements Runnable {
 
     private void logoutClient() {
 
-        synchronized (clients) {
+        synchronized (cloudController.getClients()) {
 
             if (logedInUser != null) {
-                for (ClientInfo client : clients) {
+                for (ClientInfo client : cloudController.getClients()) {
                     if (client.getName().equals(logedInUser)) {
                         client.setOnline(false);
                     }
@@ -212,7 +210,7 @@ public class CloudControllerWorker implements Runnable {
     public String credits() {
         if(logedInUser == null ) return "Sie sind nicht eingeloggt!";
 
-        for (ClientInfo client : clients) {
+        for (ClientInfo client : cloudController.getClients()) {
             if (client.isOnline() && client.getName().equals(logedInUser)) {
                 return client.getCredits() + "";
             }
@@ -224,7 +222,7 @@ public class CloudControllerWorker implements Runnable {
     public String buy(long credits) {
         if(logedInUser == null ) return "Sie sind nicht eingeloggt!";
 
-        for (ClientInfo client : clients) {
+        for (ClientInfo client : cloudController.getClients()) {
             if (client.isOnline() && client.getName().equals(logedInUser)) {
                 client.setCredits(client.getCredits() + credits);
 
@@ -240,7 +238,7 @@ public class CloudControllerWorker implements Runnable {
 
         String result = "";
 
-        for (NodeInfo node : nodes) {
+        for (NodeInfo node : cloudController.getNodes()) {
             node.updateNode();
             String nodeOperator = "";
             if(node.isOnline()) nodeOperator = node.getOperators();
@@ -286,6 +284,14 @@ public class CloudControllerWorker implements Runnable {
                 if (node == null) {
                     return "Es gibt keinen verfügbaren Server zum berechnen ihrer Rechnung! Bitte versuchen Sie es später nocheinmal.";
                 } else {
+                	
+                	if(cloudController.getOperatorStatistics().containsKey(operator.charAt(0))) {
+						Long operatorUse = cloudController.getOperatorStatistics().get(operator.charAt(0));
+						cloudController.getOperatorStatistics().put(operator.charAt(0), operatorUse + 1);
+					} else {
+						cloudController.getOperatorStatistics().put(operator.charAt(0), 1l);
+					}
+                	
                     String response = makeRequest(node, "compute " + firstNumber + " " + operator + " " + secondNumber);
                     if(response.startsWith("Error")) return response;
                     else {
@@ -308,15 +314,15 @@ public class CloudControllerWorker implements Runnable {
 
     private NodeInfo FindOnlineServerWithMinimalUsageAndApropriateOperator(String operator) {
 
-        synchronized (nodes) {
+        synchronized (cloudController.getNodes()) {
 
-            for (NodeInfo node : nodes) {
+            for (NodeInfo node : cloudController.getNodes()) {
                 node.updateNode();
             }
 
             NodeInfo minimum = null;
 
-            for (NodeInfo node : nodes) {
+            for (NodeInfo node : cloudController.getNodes()) {
                 if (node.getOperators().contains(operator)) {
                     if (((minimum == null) && node.isOnline()) || ((minimum != null) && node.isOnline() && (minimum.getUsage() > node.getUsage()))) {
                         minimum = node;
@@ -328,13 +334,13 @@ public class CloudControllerWorker implements Runnable {
     }
 
     private void setUserCredits(long creditsAfterCountings){
-        for (ClientInfo user : clients) {
+        for (ClientInfo user : cloudController.getClients()) {
             if(user.getName().equals(logedInUser)) user.setCredits(creditsAfterCountings);
         }
     }
 
     private long getCreditsOfLogedInUser() throws IOException{
-        for (ClientInfo user : clients) {
+        for (ClientInfo user : cloudController.getClients()) {
             if(user.getName().equals(logedInUser)) return user.getCredits();
         }
 
@@ -342,7 +348,7 @@ public class CloudControllerWorker implements Runnable {
     }
 
     private void setNodeUsage(NodeInfo n, long i) {
-        for (NodeInfo node : nodes) {
+        for (NodeInfo node : cloudController.getNodes()) {
             if(node.getPort() == n.getPort() && node.getAdress() == n.getAdress()) node.setUsage(node.getUsage() + i);
         }
     }

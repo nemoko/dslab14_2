@@ -55,6 +55,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	private ArrayList<Socket> sockets;
 
 	private Registry registry;
+	
+	private LinkedHashMap<Character, Long> operatorStatistics;
 
 	private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
 		@Override
@@ -85,6 +87,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 		sockets = new ArrayList<Socket>();
 		nodes = new ArrayList<NodeInfo>();
+		operatorStatistics = new LinkedHashMap<>();
 
 		tcpPort = this.config.getInt("tcp.port");
 		udpPort = this.config.getInt("udp.port");
@@ -146,8 +149,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 					while (!tcpServer.isClosed()) {
 						Socket socket = tcpServer.accept();
-						Runnable pw = new CloudControllerWorker(socket, nodes,
-								clients);
+						Runnable pw = new CloudControllerWorker(socket, CloudController.this);
 
 						sockets.add(socket);
 						executor.execute(pw);
@@ -178,6 +180,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		} catch (AlreadyBoundException e) {
 			e.printStackTrace();
 		}
+		
+		write("Registry instance wurde erfolgreich eingerichtet.");
 
 	}
 
@@ -427,8 +431,24 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 	@Override
 	public LinkedHashMap<Character, Long> statistics() throws RemoteException {
-		// TODO Auto-generated method stub
-		return null;
+//		LinkedHashMap<Character, Long> operatorStatistics = new LinkedHashMap<>();
+//		
+//		List<ComputationRequestInfo> requestInfos = getLogs();
+//		for(ComputationRequestInfo cr : requestInfos) {
+//			String operationRequest = cr.getOperationRequest();
+//			int firstSpace = operationRequest.indexOf(" ");
+//			String operator = operationRequest.substring(firstSpace + 1, firstSpace + 3);//operation request is the form a [+|-|*|/] b
+//			
+//			if(operatorStatistics.containsKey(operator.charAt(0))) {
+//				Long operatorUse = operatorStatistics.get(operator.charAt(0));
+//				operatorStatistics.put(operator.charAt(0), operatorUse + 1);
+//			} else {
+//				operatorStatistics.put(operator.charAt(0), 1l);
+//			}
+//			
+//		}
+		
+		return operatorStatistics;
 	}
 
 	@Override
@@ -443,4 +463,18 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		// TODO Auto-generated method stub
 
 	}
+
+	public LinkedHashMap<Character, Long> getOperatorStatistics() {
+		return operatorStatistics;
+	}
+	
+	public ArrayList<NodeInfo> getNodes() {
+		return nodes;
+	}
+
+	public ArrayList<ClientInfo> getClients() {
+		return clients;
+	}
+	
+	
 }
