@@ -1,5 +1,6 @@
 package controller;
 
+import admin.Subscribtion;
 import client.ClientInfo;
 import node.NodeInfo;
 import util.Config;
@@ -298,9 +299,20 @@ public class CloudControllerWorker implements Runnable {
                         setNodeUsage(node, 50 * response.length());
                         if(compute.equals("")) {
                             setUserCredits(creditsAfterCountings);
-                            if(cloudController.getNotificationCallback() != null) {
-                            	cloudController.getNotificationCallback().notify(logedInUser, (int)creditsAfterCountings);
+                            
+                            Subscribtion toRemove = null;
+                            for(Subscribtion s : cloudController.getSubscriptions()) {
+                            	if(s.getSubscribedForUsername().equals(logedInUser)) {
+                            		if(s.getCreditsLimit() > creditsAfterCountings) {
+                            			s.getNotificationCallback().notify(logedInUser, (int)creditsAfterCountings);
+                                		toRemove = s;
+                            		}
+                            	}
                             }
+                            if(toRemove != null) {
+                            	cloudController.getSubscriptions().remove(toRemove);
+                            }
+                            
                             
                             return response;
                         }

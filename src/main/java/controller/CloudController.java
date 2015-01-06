@@ -1,6 +1,7 @@
 package controller;
 
 import admin.INotificationCallback;
+import admin.Subscribtion;
 import cli.Command;
 import cli.Shell;
 import client.ClientInfo;
@@ -53,11 +54,11 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	public int nodeCheckPeriod;
 
 	static ExecutorService executor;
-	
-	private INotificationCallback notificationCallback;
 
 	private ArrayList<NodeInfo> nodes;
 	private ArrayList<ClientInfo> clients;
+	private ArrayList<Subscribtion> subscriptions;
+	
 	private ArrayList<Socket> sockets;
 
 	private Registry registry;
@@ -93,6 +94,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 		sockets = new ArrayList<Socket>();
 		nodes = new ArrayList<NodeInfo>();
+		subscriptions = new ArrayList<Subscribtion>();
 		operatorStatistics = new LinkedHashMap<>();
 
 		tcpPort = this.config.getInt("tcp.port");
@@ -391,9 +393,18 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	@Override
 	public boolean subscribe(String username, int credits,
 			INotificationCallback callback) throws RemoteException {
-		this.notificationCallback = callback;
+		
+		for(Subscribtion s : getSubscriptions()) {
+			if(s.getSubscribedForUsername().equals(username)) {
+				return false;
+			}
+		}
+		
+		Subscribtion subscribtion = new Subscribtion(credits, username, callback);
+		getSubscriptions().add(subscribtion);
 		
 		return true;
+		
 	}
 
 	@Override
@@ -498,9 +509,13 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	public ArrayList<ClientInfo> getClients() {
 		return clients;
 	}
-	
-	public INotificationCallback getNotificationCallback() {
-		return notificationCallback;
+
+	public ArrayList<Subscribtion> getSubscriptions() {
+		return subscriptions;
+	}
+
+	public void setSubscriptions(ArrayList<Subscribtion> subscriptions) {
+		this.subscriptions = subscriptions;
 	}
 	
 }

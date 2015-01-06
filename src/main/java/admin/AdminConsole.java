@@ -107,7 +107,12 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 						if(remoteInterface == null) {
 							throw new RemoteException("Connection wasn't established");
 						}
-						userResponseStream.println(subscribe("username", 500, this));
+						int spaceIndex = command.indexOf(" ", 11);
+						String username = command.substring(11, spaceIndex);
+						String creditsString = command.substring(spaceIndex + 1);
+						int credits = Integer.parseInt(creditsString);
+						boolean succ = subscribe(username, (int)credits, this);
+						userResponseStream.println(formatSubscribtion(username, credits, succ));
 					}
 
 				} catch (RemoteException e ) {
@@ -118,7 +123,12 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 						} else if (command.startsWith("!statistics")) {
 							resp = formatStatistics(statistics());
 						} else if (command.startsWith("!subscribe")) {
-							resp = Boolean.toString(subscribe("username", 500, this));
+							int spaceIndex = command.indexOf(" ", 11);
+							String username = command.substring(11, spaceIndex);
+							String creditsString = command.substring(spaceIndex + 1);
+							int credits = Integer.parseInt(creditsString);
+							boolean succ = subscribe(username, (int)credits, this);
+							resp = formatSubscribtion(username, credits, succ);
 						}
 						userResponseStream.println(resp);
 					} else {
@@ -157,15 +167,29 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 		}
 		return statistics;
 	}
+	
+	private String formatSubscribtion(String username, int credits, boolean successfull) {
+		if(successfull) {
+			return "Successfully subscribed for user "+username+".";
+		} else {
+			return "Subscribtion failed.";
+		}
+	}
 
 	@Override
 	public boolean subscribe(String username, int credits,
 			INotificationCallback callback) throws RemoteException {
 		
 		// create a remote object of INotificationCallback object
-		INotificationCallback notifCallback = (INotificationCallback) UnicastRemoteObject.exportObject(callback, 0);
+		INotificationCallback notifCallback = null;
+		try {
+			notifCallback = (INotificationCallback) UnicastRemoteObject.exportObject(callback, 0);
+		} catch (java.rmi.server.ExportException e) {
+			UnicastRemoteObject.unexportObject(callback, true);
+			notifCallback = (INotificationCallback) UnicastRemoteObject.exportObject(callback, 0);
+		}
 		
-		return remoteInterface.subscribe("username", 500, notifCallback);
+		return remoteInterface.subscribe(username, credits, notifCallback);
 	}
 
 	@Override
@@ -203,7 +227,7 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 
 	@Override
 	public void notify(String username, int credits) throws RemoteException {
-		userResponseStream.println(username + " has "+credits);
+		userResponseStream.println("Notification: "+ username + " has less than " + credits + " credits.");
 		
 	}
 	
