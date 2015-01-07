@@ -220,8 +220,8 @@ public class Client implements IClientCli, Runnable {
      *            the first argument is the name of the {@link Client} component
      */
     public static void main(String[] args) {
-        Client client = new Client(args[0], new Config("client"), System.in, System.out);
-        //Client client = new Client("client", new Config("client"), System.in, System.out);
+        //Client client = new Client(args[0], new Config("client"), System.in, System.out);
+        Client client = new Client("client", new Config("client"), System.in, System.out);
         client.run();
     }
 

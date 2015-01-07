@@ -1,5 +1,6 @@
 package node;
 
+import model.ComputationRequestInfo;
 import util.DateFormatter;
 
 import java.io.*;
@@ -13,8 +14,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-import model.ComputationRequestInfo;
-
 /**
  * Ein Arbeiter, der sich um eine Anfrage vom Server kümmert
  */
@@ -24,6 +23,8 @@ public class NodeWorker implements Runnable{
     private String logDir;
     private String operators;
     private String name;
+    private int rmin;
+    private Node node;
 
     private BufferedReader in;
     private PrintWriter out;
@@ -35,11 +36,13 @@ public class NodeWorker implements Runnable{
         }
     };
 
-    public NodeWorker(Socket socket, String logDir, String operators, String name) {
+    public NodeWorker(Socket socket, String logDir, String operators, String name, int rmin, Node node) {
         this.socket = socket;
         this.logDir = logDir;
         this.operators = operators;
         this.name = name;
+        this.rmin = rmin;
+        this.node = node;
 
         try {
             in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
@@ -78,6 +81,13 @@ public class NodeWorker implements Runnable{
                 	ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream());
     				
     				outputStream.writeObject(getLogs());
+                } else if (type.equals("!share")) {
+                    int share = Integer.parseInt(received.substring(type.length() + 1));
+                    if(share >= rmin) out.println("!ok");
+                    else out.println("!nok");
+                } else if (type.equals("!commit")) {
+                    node.setResources(Integer.parseInt(received.substring(type.length() + 1)));
+                } else if (type.equals("!rollback")) {
                 }
                 else {
                     out.println("Keine richtige Anfrage");

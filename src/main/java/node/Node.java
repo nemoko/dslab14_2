@@ -4,15 +4,12 @@ import cli.Command;
 import cli.Shell;
 import util.Config;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.net.*;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.*;
+import java.util.concurrent.*;
 
 public class Node implements INodeCli, Runnable {
 
@@ -31,12 +28,18 @@ public class Node implements INodeCli, Runnable {
     private int alivePeriod;
     private String logDir;
     private String operators;
+    private int rmin;
 
     static ServerSocket tcpServer;
     static DatagramSocket udpServer;
     static ExecutorService executor;
 
+    private InetAddress IPAddress;
+
     private Shell shell;
+
+    private ArrayList<String> nodesIP;
+    private Integer cloudResources;
 
     private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
         @Override
@@ -70,6 +73,7 @@ public class Node implements INodeCli, Runnable {
         alivePeriod = config.getInt("node.alive");
         logDir = config.getString("log.dir");
         operators = config.getString("node.operators");
+        rmin = config.getInt("node.rmin");
         udpServerPort = config.getInt("controller.udp.port");
 
         try {
@@ -85,6 +89,7 @@ public class Node implements INodeCli, Runnable {
         }
 
         executor = Executors.newFixedThreadPool(10);
+        nodesIP = new ArrayList<>();
     }
 
     @Override
@@ -101,7 +106,7 @@ public class Node implements INodeCli, Runnable {
 
                     while (!Thread.currentThread().isInterrupted()) {
 
-                        Runnable pw = new NodeWorker(tcpServer.accept(), logDir, operators, componentName);
+                        Runnable pw = new NodeWorker(tcpServer.accept(), logDir, operators, componentName, rmin, Node.this);
 
                         executor.execute(pw);
                     }
@@ -119,43 +124,193 @@ public class Node implements INodeCli, Runnable {
 
                 write("UDP läuft..");
 
-                while (!Thread.currentThread().isInterrupted()) {
                     try {
-                        InetAddress IPAddress = InetAddress.getByName(controllerHost);
+                        IPAddress = InetAddress.getByName(controllerHost);
 
-                        while (!Thread.currentThread().isInterrupted()) {
-                            Thread.sleep(alivePeriod);
+                        sendHelloMessage();
 
-                            byte[] sendData = new byte[17];
-
-                            String op = operators;
-
-                            if(op.length() == 0) op = "    ";
-                            else if(op.length() == 1) op = op + "   ";
-                            else if(op.length() == 2) op = op + "  ";
-                            else if(op.length() == 3) op = op + " ";
-
-                            String port = tcpPort + "";
-
-                            if(port.length() == 0) op = "     ";
-                            else if(port.length() == 1) port = port + "    ";
-                            else if(port.length() == 2) port = port + "   ";
-                            else if(port.length() == 3) port = port + "  ";
-                            else if(port.length() == 4) port = port + " ";
-
-                            sendData = ("!alive " + tcpPort + " " + op).getBytes();
-
-                            DatagramPacket packet = new DatagramPacket(sendData, sendData.length, IPAddress, udpServerPort);
-
-                            udpServer.send(packet);
-                        }
                     } catch (Exception ex) {
-                        break;
+                        write("Ein Fehler ist aufgetretten. Bitte starten Sie die Node neu!");
                     }
-                }
             }
+
         });
         udpNode.start();
+
+        // Waiting for receiving UDP Packet !init from CloudController
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    udpServer = new DatagramSocket(tcpPort + 1000);
+
+                    byte[] data = new byte[4096];
+
+                    while (!udpServer.isClosed()) {
+                        DatagramPacket packet = new DatagramPacket(data,
+                                data.length);
+
+                        udpServer.receive(packet);
+
+                        String response = new String(packet.getData());
+
+                        if (response.startsWith("!init")) {
+
+                            String[] parts = clearResponse(response.split(" "));
+
+                            if(parts.length == 1) write("Ein fehlerhaftes Packet vom CloudController!");
+                            else if(parts.length == 2) {
+                                cloudResources = Integer.parseInt(parts[1]);
+                                if(cloudResources >= rmin) sendAliveMessages();
+                                else write("Dieser Node konnte nicht vom CloudController aufgenommen werden, weil zu wenige Resourcen zur Verfügung stehen.");
+                                break;
+                            }
+                            else {
+                                for(int i = 1; i < parts.length-1; i++){
+                                    nodesIP.add(parts[i]);
+                                }
+                                cloudResources = Integer.parseInt(parts[parts.length-1]);
+                                contactAllNodesAndWaitForAnswer("!share " + (cloudResources / (nodesIP.size() + 1)));
+                                break;
+                            }
+                        }
+                    }
+                } catch (IOException ex) {
+                    System.out.println(ex.getMessage());
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } catch (ExecutionException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    private String[] clearResponse(String[] split) {
+        String neu = "";
+        for(int i = 0; i < split.length; i++){
+            if(split[i].length() == 1 && split[i].charAt(0) == 0) return neu.trim().split(" ");
+            else neu += " " + split[i].replace("/", "");
+        }
+        return neu.trim().split(" ");
+    }
+
+    private void sendHelloMessage() {
+        byte[] sendData = new byte[4096];
+
+        sendData = ("!hello").getBytes();
+
+        DatagramPacket packet = new DatagramPacket(sendData, sendData.length, IPAddress, udpServerPort);
+
+        try {
+            udpServer.send(packet);
+        } catch (IOException e) {
+            write("Der CloudController konnte nicht erreicht werden");
+        }
+    }
+
+    private void contactAllNodesAndWaitForAnswer(final String request) throws InterruptedException, ExecutionException, IOException {
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+
+        Set<Callable<String>> callables = new HashSet<Callable<String>>();
+
+        for(final String ip : nodesIP){
+            callables.add(new Callable<String>() {
+                public String call() throws Exception {
+                    return makeRequest(request, ip);
+                }
+            });
+        }
+
+        List<Future<String>> futures = executorService.invokeAll(callables);
+        decideCommitOrRollback(executorService, futures);
+    }
+
+    private void contactAllNodes(final String request) throws InterruptedException, ExecutionException, IOException {
+
+        for(final String ip : nodesIP){
+            makeRequest(request, ip);
+        }
+    }
+
+    public void decideCommitOrRollback(ExecutorService executorService, List<Future<String>> futures) throws ExecutionException, InterruptedException, IOException {
+
+        String response = "";
+
+        for(Future<String> future : futures){
+            if(future.get().equals("!nok")) {
+                response = "!rollback " + (cloudResources / (nodesIP.size() + 1));
+                write("Dieser Node konnte nicht vom CloudController aufgenommen werden, weil zu wenige Resourcen zur Verfügung stehen.");
+                break;
+            }
+        }
+
+        executorService.shutdown();
+
+        if(response.equals("")) {
+            response = "!commit " + (cloudResources / (nodesIP.size() + 1));
+            contactAllNodes(response);
+            this.cloudResources = cloudResources / (nodesIP.size() + 1);
+            sendAliveMessages();
+        }
+        else contactAllNodes(response);
+    }
+
+    private void sendAliveMessages() throws InterruptedException, IOException {
+        while (!Thread.currentThread().isInterrupted()) {
+
+            Thread.sleep(alivePeriod);
+
+            byte[] sendData = new byte[4096];
+
+            sendData = ("!alive " + tcpPort + " " + operators).getBytes();
+
+            DatagramPacket packet = new DatagramPacket(sendData, sendData.length, IPAddress, udpServerPort);
+
+            udpServer.send(packet);
+        }
+    }
+
+    /*
+     * Der Parameter request wird an den Server per TCP geschickt
+     */
+    public String makeRequest(String request, String nodeAdress) throws IOException {
+
+        String[] parts = nodeAdress.split(":");
+
+        Socket socket = null;
+        try {
+            socket = new Socket(parts[0] + "", Integer.parseInt(parts[1]));
+        } catch (IOException e) {
+            return "Es konnte keine Verbindung zum " + nodeAdress + " hergestellt werden";
+        }
+
+        socket.setKeepAlive(true);
+
+        String response = "";
+
+        try {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+
+            if (socket != null && socket.isConnected()) {
+                out.println(request);
+                response = in.readLine();
+            }
+        } catch (UnknownHostException err) {
+            return "Unbekannter host: " + parts[0];
+        } catch (IOException err) {
+            return "Ein Fehler trat auf!";
+        }
+
+        socket.close();
+
+        if(response == null) return "";
+        return response;
+    }
+
+    public void setResources(Integer resources){
+        this.cloudResources = resources;
     }
 
     @Override
@@ -186,6 +341,8 @@ public class Node implements INodeCli, Runnable {
 
         System.in.close();
 
+        Thread.currentThread().interrupt();
+
         return "Node wurde  beendet";
     }
 
@@ -211,8 +368,8 @@ public class Node implements INodeCli, Runnable {
      *            which also represents the name of the configuration
      */
     public static void main(String[] args) {
-        Node node = new Node(args[0], new Config(args[0]), System.in, System.out);
-        //Node node = new Node("node2", new Config("node2"), System.in, System.out);
+        //Node node = new Node(args[0], new Config(args[0]), System.in, System.out);
+        Node node = new Node("node2", new Config("node2"), System.in, System.out);
         node.run();
     }
 
@@ -220,9 +377,10 @@ public class Node implements INodeCli, Runnable {
     // implement them for the first submission. ---
 
     @Override
+    @Command("resources")
     public String resources() throws IOException {
-        // TODO Auto-generated method stub
-        return null;
+        if(cloudResources == null) return "Es wurde keine Verbindung zum CloudController hergestellt und deshalb kann die Resource höhe nicht ermittelt werden";
+        return cloudResources + "";
     }
 
 }

@@ -12,26 +12,14 @@ import util.Config;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.Charset;
-import java.rmi.AccessException;
-import java.rmi.AlreadyBoundException;
-import java.rmi.NoSuchObjectException;
-import java.rmi.NotBoundException;
-import java.rmi.RemoteException;
+import java.rmi.*;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.security.Key;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -52,6 +40,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 	public static int nodeTimeout;
 	public int nodeCheckPeriod;
+
+    private int rmax;
 
 	static ExecutorService executor;
 
@@ -101,6 +91,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		udpPort = this.config.getInt("udp.port");
 		nodeTimeout = this.config.getInt("node.timeout");
 		nodeCheckPeriod = this.config.getInt("node.checkPeriod");
+        rmax = this.config.getInt("controller.rmax");
 
 		executor = Executors.newFixedThreadPool(10);
 	}
@@ -137,7 +128,10 @@ public class CloudController implements ICloudControllerCli, Runnable,
 									Integer.parseInt(response.substring(7, 12)
 											.trim()), response.substring(13)
 											.trim());
-						}
+						} else if (response.startsWith("!hello")) {
+
+                            makeUDPResponse(packet.getAddress(), packet.getPort(),"!init ");
+                        }
 					}
 				} catch (IOException ex) {
 
@@ -173,7 +167,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 			// create and export the registry instance on localhost at the
 			// specified port
 			registry = LocateRegistry.createRegistry(config
-					.getInt("controller.rmi.port"));
+                    .getInt("controller.rmi.port"));
 
 			// create a remote object of this cloudcontroller object
 			IAdminConsole remote = (IAdminConsole) UnicastRemoteObject
@@ -193,10 +187,42 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 	}
 
-	/*
-	 * Jedes Mal, wenn der UDP Server ein Packet bekommt, wird die Nodes Liste
-	 * aktualisiert
-	 */
+    private void makeUDPResponse(InetAddress address, int port, String response) {
+
+            byte[] sendData = new byte[4096];
+
+            sendData = ("!init " + getNodeList() + rmax).getBytes();
+
+            DatagramPacket packet = new DatagramPacket(sendData, sendData.length, address, port);
+
+        try {
+            udpServer.send(packet);
+        } catch (IOException e) {
+            write("Die Node von " + address + ":" + port + " konnte nicht erreicht werden");
+        }
+    }
+
+    private String getNodeList() {
+        synchronized (nodes) {
+
+            String result = "";
+
+            for (NodeInfo node : nodes) {
+                if (node.isOnline()) {
+                    result += " " + node.getAdress() + ":" + node.getPort();
+                }
+            }
+
+            if(result.equals("")) return result;
+            else return result.trim() + " ";
+        }
+    }
+
+
+    /*
+     * Jedes Mal, wenn der UDP Server ein Packet bekommt, wird die Nodes Liste
+     * aktualisiert
+     */
 	private void updateNodeList(InetAddress address, int port, String operators) {
 
 		synchronized (nodes) {
@@ -381,11 +407,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	 *            component
 	 */
 	public static void main(String[] args) {
-		CloudController cloudController = new CloudController(args[0],
-				new Config("controller"), System.in, System.out);
-		// CloudController cloudController = new
-		// CloudController("CloudController", new Config("controller"),
-		// System.in, System.out);
+		//CloudController cloudController = new CloudController(args[0], new Config("controller"), System.in, System.out);
+	    CloudController cloudController = new CloudController("CloudController", new Config("controller"), System.in, System.out);
 
 		cloudController.run();
 	}
@@ -470,8 +493,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		Collections.sort(entries, new Comparator<Map.Entry<Character, Long>>() {
 
 			@Override
-			public int compare(Entry<Character, Long> arg0,
-					Entry<Character, Long> arg1) {
+			public int compare(Map.Entry<Character, Long> arg0,
+					Map.Entry<Character, Long> arg1) {
 				return -arg0.getValue().compareTo(arg1.getValue());
 			}
         });
