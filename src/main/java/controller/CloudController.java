@@ -42,6 +42,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	public int nodeCheckPeriod;
 
     private int rmax;
+    private String hmacFile;
 
 	static ExecutorService executor;
 
@@ -92,6 +93,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		nodeTimeout = this.config.getInt("node.timeout");
 		nodeCheckPeriod = this.config.getInt("node.checkPeriod");
         rmax = this.config.getInt("controller.rmax");
+        hmacFile = this.config.getString("hmac.key");
 
 		executor = Executors.newFixedThreadPool(10);
 	}
@@ -151,7 +153,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 
 					while (!tcpServer.isClosed()) {
 						Socket socket = tcpServer.accept();
-						Runnable pw = new CloudControllerWorker(socket, CloudController.this);
+						Runnable pw = new CloudControllerWorker(socket, CloudController.this, hmacFile);
 
 						sockets.add(socket);
 						executor.execute(pw);

@@ -1,13 +1,20 @@
 package node;
 
 import model.ComputationRequestInfo;
+import org.bouncycastle.util.encoders.Base64;
 import util.DateFormatter;
+import util.Keys;
 
+import javax.crypto.Mac;
 import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.InvalidKeyException;
+import java.security.Key;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -25,6 +32,7 @@ public class NodeWorker implements Runnable{
     private String name;
     private int rmin;
     private Node node;
+    private String hmacFile;
 
     private BufferedReader in;
     private PrintWriter out;
@@ -36,13 +44,14 @@ public class NodeWorker implements Runnable{
         }
     };
 
-    public NodeWorker(Socket socket, String logDir, String operators, String name, int rmin, Node node) {
+    public NodeWorker(Socket socket, String logDir, String operators, String name, int rmin, String hmacFile, Node node) {
         this.socket = socket;
         this.logDir = logDir;
         this.operators = operators;
         this.name = name;
         this.rmin = rmin;
         this.node = node;
+        this.hmacFile = hmacFile;
 
         try {
             in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
@@ -73,20 +82,30 @@ public class NodeWorker implements Runnable{
                     out.println("Verbindung beendet");
                 }
 
-                String type = getType(received);
+                String[] input = received.split(" ");
+
+                String type = input[1];
 
                 if (type.equals("compute")) {
-                    out.println(compute(received.substring(type.length() + 1)));
+
+                    boolean equalHMACs = isEqualHMAC(getHMAC(received.substring(input[0].length()).trim()), decodeBase64(input[0].getBytes()));
+
+                    if(equalHMACs) {
+                        if (input.length != 5) out.println("Error: Das Format zu berechnen stimmt nicht");
+                        else out.println(new String(encodeBase64(getHMAC(compute(input[2] + " " + input[3] + " " + input[4])))) + " " + compute(input[2] + " " + input[3] + " " + input[4]));
+                    } else {
+                        out.println(new String(encodeBase64(getHMAC("!tampered " + received))) + " !tampered " + received);
+                    }
                 } else if (type.equals("!getLogs")) {
                 	ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream());
     				
     				outputStream.writeObject(getLogs());
                 } else if (type.equals("!share")) {
-                    int share = Integer.parseInt(received.substring(type.length() + 1));
+                    int share = Integer.parseInt(input[2]);
                     if(share >= rmin) out.println("!ok");
                     else out.println("!nok");
                 } else if (type.equals("!commit")) {
-                    node.setResources(Integer.parseInt(received.substring(type.length() + 1)));
+                    node.setResources(Integer.parseInt(input[2]));
                 } else if (type.equals("!rollback")) {
                 }
                 else {
@@ -256,6 +275,43 @@ public class NodeWorker implements Runnable{
         } catch (IOException e) {
             write("Es gab ein Problem beim Schreiben in die Datei!");
         }
+    }
+
+    public byte[] getHMAC(String message){
+
+        try {
+            File file = new File(hmacFile);
+
+            Key secretKey = Keys.readSecretKey(file);
+            // make sure to use the right ALGORITHM for what you want to do (see text)
+            Mac hMac = Mac.getInstance("HmacSHA256");
+            hMac.init(secretKey);
+            // MESSAGE is the message to sign in bytes
+            hMac.update(message.getBytes("UTF-8"));
+            return hMac.doFinal();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        }
+        return new byte[]{};
+    }
+
+    public boolean isEqualHMAC(byte[] computedHash, byte[] receivedHash){
+        return MessageDigest.isEqual(computedHash, receivedHash);
+    }
+
+    public byte[] encodeBase64(byte[] encryptedMessage){
+        // encode into Base64 format
+        return Base64.encode(encryptedMessage);
+    }
+
+    public byte[] decodeBase64(byte[] encryptedMessage){
+        // encode into Base64 format
+        return Base64.decode(encryptedMessage);
     }
 
     /*

@@ -3,13 +3,17 @@ package controller;
 import admin.Subscribtion;
 import client.ClientInfo;
 import node.NodeInfo;
+import org.bouncycastle.util.encoders.Base64;
 import util.Config;
+import util.Keys;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import javax.crypto.Mac;
+import java.io.*;
 import java.net.Socket;
+import java.security.InvalidKeyException;
+import java.security.Key;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -22,13 +26,14 @@ public class CloudControllerWorker implements Runnable {
     private Config config;
 
     private Socket socket;
-    
+
     private CloudController cloudController;
 
     private BufferedReader in;
     private PrintWriter out;
 
     private String logedInUser;
+    private String hmacFile;
 
     private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
         @Override
@@ -37,9 +42,10 @@ public class CloudControllerWorker implements Runnable {
         }
     };
 
-    public CloudControllerWorker(Socket socket, CloudController cloudController) {
+    public CloudControllerWorker(Socket socket, CloudController cloudController, String hmacFile) {
         this.socket = socket;
         this.cloudController = cloudController;
+        this.hmacFile = hmacFile;
 
         try {
             in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
@@ -285,35 +291,38 @@ public class CloudControllerWorker implements Runnable {
                 if (node == null) {
                     return "Es gibt keinen verfügbaren Server zum berechnen ihrer Rechnung! Bitte versuchen Sie es später nocheinmal.";
                 } else {
-                	
-                	if(cloudController.getOperatorStatistics().containsKey(operator.charAt(0))) {
-						Long operatorUse = cloudController.getOperatorStatistics().get(operator.charAt(0));
-						cloudController.getOperatorStatistics().put(operator.charAt(0), operatorUse + 1);
-					} else {
-						cloudController.getOperatorStatistics().put(operator.charAt(0), 1l);
-					}
-                	
-                    String response = makeRequest(node, "compute " + firstNumber + " " + operator + " " + secondNumber);
+
+                    if(cloudController.getOperatorStatistics().containsKey(operator.charAt(0))) {
+                        Long operatorUse = cloudController.getOperatorStatistics().get(operator.charAt(0));
+                        cloudController.getOperatorStatistics().put(operator.charAt(0), operatorUse + 1);
+                    } else {
+                        cloudController.getOperatorStatistics().put(operator.charAt(0), 1l);
+                    }
+
+                    String response = makeRequest(node, new String(encodeBase64(getHMAC("compute " + firstNumber + " " + operator + " " + secondNumber))) + " compute " + firstNumber + " " + operator + " " + secondNumber);
+
+                    response = checkResponse(response);
+
                     if(response.startsWith("Error")) return response;
                     else {
                         setNodeUsage(node, 50 * response.length());
                         if(compute.equals("")) {
                             setUserCredits(creditsAfterCountings);
-                            
+
                             Subscribtion toRemove = null;
                             for(Subscribtion s : cloudController.getSubscriptions()) {
-                            	if(s.getSubscribedForUsername().equals(logedInUser)) {
-                            		if(s.getCreditsLimit() > creditsAfterCountings) {
-                            			s.getNotificationCallback().notify(logedInUser, (int)creditsAfterCountings);
-                                		toRemove = s;
-                            		}
-                            	}
+                                if(s.getSubscribedForUsername().equals(logedInUser)) {
+                                    if(s.getCreditsLimit() > creditsAfterCountings) {
+                                        s.getNotificationCallback().notify(logedInUser, (int)creditsAfterCountings);
+                                        toRemove = s;
+                                    }
+                                }
                             }
                             if(toRemove != null) {
-                            	cloudController.getSubscriptions().remove(toRemove);
+                                cloudController.getSubscriptions().remove(toRemove);
                             }
-                            
-                            
+
+
                             return response;
                         }
                         else resultFromPreviousNode = response;
@@ -326,6 +335,25 @@ public class CloudControllerWorker implements Runnable {
             return "Error: Das Format zu berechnen stimmt nicht";
         }
         return "Error: Das Format zu berechnen stimmt nicht";
+    }
+
+    private String checkResponse(String response) {
+
+        String[] input = response.split(" ");
+
+        if (input[1].equals("!tampered")) {
+            write("Es kam zu einem Kommunikationsfehler zur Node!");
+            return "Error: Ihre Berechnung konnte nicht durchgeführt werden, da es zu einem Kommunikationsfehler zwischen Servern kam!";
+        }
+
+        boolean equalHMACs = isEqualHMAC(getHMAC(response.substring(input[0].length()).trim()),decodeBase64(input[0].getBytes()));
+
+        if(equalHMACs) {
+            return response.substring(input[0].length()).trim();
+        } else {
+            write("Es kam zu einem Kommunikationsfehler zur Node! Die Node schickte den falschen HMAC!");
+            return "Error: Ihre Berechnung konnte nicht durchgeführt werden, da es zu einem Kommunikationsfehler zwischen Servern kam!";
+        }
     }
 
     private NodeInfo FindOnlineServerWithMinimalUsageAndApropriateOperator(String operator) {
@@ -408,6 +436,43 @@ public class CloudControllerWorker implements Runnable {
             }
         }
         return amount;
+    }
+
+    public byte[] getHMAC(String message){
+
+        try {
+            File file = new File(hmacFile);
+
+            Key secretKey = Keys.readSecretKey(file);
+            // make sure to use the right ALGORITHM for what you want to do (see text)
+            Mac hMac = Mac.getInstance("HmacSHA256");
+            hMac.init(secretKey);
+            // MESSAGE is the message to sign in bytes
+            hMac.update(message.getBytes("UTF-8"));
+            return hMac.doFinal();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        }
+        return new byte[]{};
+    }
+
+    public boolean isEqualHMAC(byte[] computedHash, byte[] receivedHash){
+        return MessageDigest.isEqual(computedHash, receivedHash);
+    }
+
+    public byte[] encodeBase64(byte[] encryptedMessage){
+        // encode into Base64 format
+        return Base64.encode(encryptedMessage);
+    }
+
+    public byte[] decodeBase64(byte[] encryptedMessage){
+        // encode into Base64 format
+        return Base64.decode(encryptedMessage);
     }
 
     /*

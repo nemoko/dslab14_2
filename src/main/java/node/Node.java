@@ -38,8 +38,11 @@ public class Node implements INodeCli, Runnable {
 
     private Shell shell;
 
+    private boolean init;
+
     private ArrayList<String> nodesIP;
     private Integer cloudResources;
+    private String hmacFile;
 
     private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
         @Override
@@ -75,6 +78,7 @@ public class Node implements INodeCli, Runnable {
         operators = config.getString("node.operators");
         rmin = config.getInt("node.rmin");
         udpServerPort = config.getInt("controller.udp.port");
+        hmacFile = config.getString("hmac.key");
 
         try {
             udpServer = new DatagramSocket();
@@ -87,6 +91,8 @@ public class Node implements INodeCli, Runnable {
         } catch (IOException ex) {
             write("Der TCP Server konnte nicht gestartet werden");
         }
+
+        init = false;
 
         executor = Executors.newFixedThreadPool(10);
         nodesIP = new ArrayList<>();
@@ -106,7 +112,7 @@ public class Node implements INodeCli, Runnable {
 
                     while (!Thread.currentThread().isInterrupted()) {
 
-                        Runnable pw = new NodeWorker(tcpServer.accept(), logDir, operators, componentName, rmin, Node.this);
+                        Runnable pw = new NodeWorker(tcpServer.accept(), logDir, operators, componentName, rmin, hmacFile, Node.this);
 
                         executor.execute(pw);
                     }
@@ -127,7 +133,7 @@ public class Node implements INodeCli, Runnable {
                     try {
                         IPAddress = InetAddress.getByName(controllerHost);
 
-                        sendHelloMessage();
+                        while(!init && !Thread.currentThread().isInterrupted()) sendHelloMessage();
 
                     } catch (Exception ex) {
                         write("Ein Fehler ist aufgetretten. Bitte starten Sie die Node neu!");
@@ -155,6 +161,8 @@ public class Node implements INodeCli, Runnable {
                         String response = new String(packet.getData());
 
                         if (response.startsWith("!init")) {
+
+                            init = true;
 
                             String[] parts = clearResponse(response.split(" "));
 
@@ -369,7 +377,7 @@ public class Node implements INodeCli, Runnable {
      */
     public static void main(String[] args) {
         //Node node = new Node(args[0], new Config(args[0]), System.in, System.out);
-        Node node = new Node("node2", new Config("node2"), System.in, System.out);
+        Node node = new Node("node3", new Config("node3"), System.in, System.out);
         node.run();
     }
 
