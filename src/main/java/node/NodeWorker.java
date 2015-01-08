@@ -84,7 +84,11 @@ public class NodeWorker implements Runnable{
 
                 String[] input = received.split(" ");
 
-                String type = input[1];
+                String type = "";
+                if(input.length > 1) {
+                	type = input[1];
+                }
+                
 
                 if (type.equals("compute")) {
 
@@ -96,7 +100,7 @@ public class NodeWorker implements Runnable{
                     } else {
                         out.println(new String(encodeBase64(getHMAC("!tampered " + received))) + " !tampered " + received);
                     }
-                } else if (type.equals("!getLogs")) {
+                } else if (received.equals("!getLogs")) {
                 	ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream());
     				
     				outputStream.writeObject(getLogs());

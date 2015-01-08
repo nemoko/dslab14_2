@@ -376,18 +376,14 @@ public class CloudController implements ICloudControllerCli, Runnable,
 			UnicastRemoteObject.unexportObject(this, true);
 
 		} catch (NoSuchObjectException e) {
-			e.printStackTrace();
 		}
 
 		try {
 			// unbind the remote object so that a client can't find it anymore
 			registry.unbind(config.getString("binding.name"));
 		} catch (AccessException e) {
-			e.printStackTrace();
 		} catch (RemoteException e) {
-			e.printStackTrace();
 		} catch (NotBoundException e) {
-			e.printStackTrace();
 		}
 
 	}
