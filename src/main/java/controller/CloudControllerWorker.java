@@ -429,16 +429,16 @@ public class CloudControllerWorker implements Runnable {
 
                 NodeInfo node = FindOnlineServerWithMinimalUsageAndApropriateOperator(operator);
 
+                if(cloudController.getOperatorStatistics().containsKey(operator.charAt(0))) {
+                    Long operatorUse = cloudController.getOperatorStatistics().get(operator.charAt(0));
+                    cloudController.getOperatorStatistics().put(operator.charAt(0), operatorUse + 1);
+                } else {
+                    cloudController.getOperatorStatistics().put(operator.charAt(0), 1l);
+                }
+                
                 if (node == null) {
                     return "Es gibt keinen verfügbaren Server zum berechnen ihrer Rechnung! Bitte versuchen Sie es später nocheinmal.";
                 } else {
-
-                    if(cloudController.getOperatorStatistics().containsKey(operator.charAt(0))) {
-                        Long operatorUse = cloudController.getOperatorStatistics().get(operator.charAt(0));
-                        cloudController.getOperatorStatistics().put(operator.charAt(0), operatorUse + 1);
-                    } else {
-                        cloudController.getOperatorStatistics().put(operator.charAt(0), 1l);
-                    }
 
                     String response = makeRequest(node, new String(encodeBase64(getHMAC("compute " + firstNumber + " " + operator + " " + secondNumber))) + " compute " + firstNumber + " " + operator + " " + secondNumber);
 
