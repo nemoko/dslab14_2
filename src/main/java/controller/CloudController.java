@@ -429,7 +429,6 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		getSubscriptions().add(subscribtion);
 		
 		return true;
-		
 	}
 
 	@Override

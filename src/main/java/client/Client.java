@@ -286,7 +286,9 @@ public class Client implements IClientCli, Runnable {
         String controllerChallenge = challengeResponse[2];
 
         this.authenticated = true;
-        return makeRequest(controllerChallenge);
+
+        String authenticateSuccess = makeRequest(controllerChallenge);
+        return "";
     }
 
     @Override
