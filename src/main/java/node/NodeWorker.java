@@ -229,15 +229,12 @@ public class NodeWorker implements Runnable{
 				
 				
 			} catch (FileNotFoundException e) {
-				e.printStackTrace();
 			} catch (IOException e) {
-				e.printStackTrace();
 			} finally {
 				try {
 					br.close();
 					in.close();
 				} catch (IOException e) {
-					e.printStackTrace();
 				}
 				
 			}	

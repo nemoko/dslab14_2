@@ -138,7 +138,6 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 
 			}
 		} catch (IOException e) {
-			e.printStackTrace();
 		}
 
 	}
@@ -146,7 +145,7 @@ public class AdminConsole implements IAdminConsole, Runnable, INotificationCallb
 	private String formatLogs(List<ComputationRequestInfo> logs) {
 		String logsString = "";
 		if(logs == null || logs.size() == 0){
-			return "There are no nodes alive.";
+			return "No logs retrieved.";
 		}
 		for(ComputationRequestInfo cr : logs){
 			logsString = logsString + cr.toString() + '\n';

@@ -112,7 +112,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 				try {
 					udpServer = new DatagramSocket(udpPort);
 
-					write("UDP Server l√§uft..");
+					write("UDP Server l‰uft..");
 
 					byte[] data = new byte[17];
 
@@ -149,7 +149,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 				try {
 					tcpServer = new ServerSocket(tcpPort);
 
-					write("TCP Server l√§uft..");
+					write("TCP Server l‰uft..");
 
 					while (!tcpServer.isClosed()) {
 						Socket socket = tcpServer.accept();
@@ -180,9 +180,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 			registry.bind(config.getString("binding.name"), remote);
 
 		} catch (RemoteException e1) {
-			e1.printStackTrace();
 		} catch (AlreadyBoundException e) {
-			e.printStackTrace();
 		}
 		
 		write("Registry instance wurde erfolgreich eingerichtet.");
@@ -247,7 +245,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	}
 
 	/*
-	 * Client Liste bef√ºllen von user.properties
+	 * Client Liste bef¸llen von user.properties
 	 */
 	private void loadUsers() {
 		clients = new ArrayList<ClientInfo>();
@@ -439,7 +437,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 		
 		for(NodeInfo nodeInfo : getNodes()) {
 			if (nodeInfo.isOnline()) {
-				Socket socket;
+				Socket socket = null;
 				try {
 					socket = new Socket(nodeInfo.getAdress(), nodeInfo.getPort());
 				
@@ -455,11 +453,14 @@ public class CloudController implements ICloudControllerCli, Runnable,
 					socket.close();
 					
 				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
 				} catch (ClassNotFoundException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
+				} finally {
+					if(socket != null) {
+						try {
+							socket.close();
+						} catch (IOException e) {
+						}
+					}
 				}
 				
 				
