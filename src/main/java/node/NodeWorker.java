@@ -104,13 +104,13 @@ public class NodeWorker implements Runnable{
                 	ObjectOutputStream outputStream = new ObjectOutputStream(socket.getOutputStream());
     				
     				outputStream.writeObject(getLogs());
-                } else if (type.equals("!share")) {
-                    int share = Integer.parseInt(input[2]);
+                } else if (received.startsWith("!share")) {
+                    int share = Integer.parseInt(input[1]);
                     if(share >= rmin) out.println("!ok");
                     else out.println("!nok");
-                } else if (type.equals("!commit")) {
-                    node.setResources(Integer.parseInt(input[2]));
-                } else if (type.equals("!rollback")) {
+                } else if (received.startsWith("!commit")) {
+                    node.setResources(Integer.parseInt(input[1]));
+                } else if (received.startsWith("!rollback")) {
                 }
                 else {
                     out.println("Keine richtige Anfrage");

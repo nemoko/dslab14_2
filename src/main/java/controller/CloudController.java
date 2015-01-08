@@ -112,7 +112,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 				try {
 					udpServer = new DatagramSocket(udpPort);
 
-					write("UDP Server läuft..");
+					write("UDP Server lÃ¤uft..");
 
 					byte[] data = new byte[17];
 
@@ -149,7 +149,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 				try {
 					tcpServer = new ServerSocket(tcpPort);
 
-					write("TCP Server läuft..");
+					write("TCP Server lÃ¤uft..");
 
 					while (!tcpServer.isClosed()) {
 						Socket socket = tcpServer.accept();
@@ -245,7 +245,7 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	}
 
 	/*
-	 * Client Liste befüllen von user.properties
+	 * Client Liste befï¿½llen von user.properties
 	 */
 	private void loadUsers() {
 		clients = new ArrayList<ClientInfo>();
