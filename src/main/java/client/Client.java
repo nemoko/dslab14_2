@@ -2,14 +2,26 @@ package client;
 
 import cli.Command;
 import cli.Shell;
+import org.bouncycastle.util.encoders.Base64;
+import security.Cryptography;
 import util.Config;
 
 import java.io.*;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
+import java.security.PrivateKey;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 public class Client implements IClientCli, Runnable {
 
@@ -30,6 +42,13 @@ public class Client implements IClientCli, Runnable {
     private static Socket socket;
     private BufferedReader in;
     private PrintWriter out;
+
+    private IvParameterSpec IV = null;
+    private SecretKey SECRET_KEY = null;
+    private boolean authenticated;
+
+
+    private static Cryptography Crypto;
 
     private static final ThreadLocal<DateFormat> DATE_FORMAT = new ThreadLocal<DateFormat>() {
         @Override
@@ -54,6 +73,7 @@ public class Client implements IClientCli, Runnable {
         this.config = config;
         this.userRequestStream = userRequestStream;
         this.userResponseStream = userResponseStream;
+        this.authenticated = false;
 
         this.configUsers = new Config("user");
 
@@ -62,6 +82,7 @@ public class Client implements IClientCli, Runnable {
 
         host = config.getString("controller.host");
         tcpPort = config.getInt("controller.tcp.port");
+
     }
 
     @Override
@@ -121,8 +142,47 @@ public class Client implements IClientCli, Runnable {
             }
 
             if (socket != null && socket.isConnected()) {
-                out.println(request);
-                response = in.readLine();
+                //SEND AES OUTPUT
+                if(authenticated) {
+                    try {
+                        byte[] msg = Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, request.getBytes());
+                        //System.out.println("SENDING: " + new String(msg));
+                        out.println(new String(msg));
+                    } catch (InvalidKeyException e) {
+                        e.printStackTrace();
+                    } catch (InvalidAlgorithmParameterException e) {
+                        e.printStackTrace();
+                    } catch (IllegalBlockSizeException e) {
+                        e.printStackTrace();
+                    } catch (BadPaddingException e) {
+                        e.printStackTrace();
+                    }
+
+                    //READ INPUT
+//                    response = "";
+//                    do {
+//                        response += in.readLine();
+//                    } while (in.ready());
+
+                    response = in.readLine(); //TODO 1 line enough?
+
+                    //DECRYPT AES INPUT
+                    try {
+                        response = new String(Crypto.runAes(Cipher.DECRYPT_MODE, SECRET_KEY, IV, response.getBytes()));
+                        if(response == null) return "";
+                    } catch (InvalidKeyException e) {
+                        e.printStackTrace();
+                    } catch (InvalidAlgorithmParameterException e) {
+                        e.printStackTrace();
+                    } catch (IllegalBlockSizeException e) {
+                        e.printStackTrace();
+                    } catch (BadPaddingException e) {
+                        e.printStackTrace();
+                    }
+                } else {
+                    out.println(request);
+                    response = in.readLine();
+                }
             }
         } catch (UnknownHostException err) {
             write("Unbekannter host: " + host);
@@ -144,6 +204,7 @@ public class Client implements IClientCli, Runnable {
     @Override
     @Command
     public String login(String username, String password) throws IOException {
+        if(!authenticated) return "Sie müssen sich zuerst authentifizieren!";
 
         if(loggedInUser == null) {
             String response = makeRequest("login " + username + " " + password);
@@ -158,15 +219,95 @@ public class Client implements IClientCli, Runnable {
 
     @Override
     @Command
+    public String authenticate(String username) throws IOException {
+
+        Crypto = new Cryptography(config,shell,username);
+
+        byte[] clientChallenge;
+        byte[] clientChallenge64;
+        byte[] rsaMessage = null;
+
+        //TODO make sure a private key for this user exists or print an error
+        PrivateKey privKey;
+        try {
+            privKey = Crypto.getPrivKey(username);
+        } catch (IOException e) {
+            return "Es gibt kein Schluessel fuer diesen User"; //TODO fix lang
+        }
+
+        clientChallenge = Crypto.genSecRandom(32);
+        clientChallenge64 = Base64.encode(clientChallenge);
+
+        String message = "authenticate " + username + " " + new String(clientChallenge64);
+
+        //System.out.println("Client plaintextmessage: " + message);
+
+        try {
+            rsaMessage = Crypto.runRsa(Cipher.ENCRYPT_MODE, Crypto.getPubKey("controller"), message.getBytes());
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        } catch (IllegalBlockSizeException e) {
+            e.printStackTrace();
+        } catch (BadPaddingException e) {
+            e.printStackTrace();
+        }
+
+        String response = makeRequest(new String(rsaMessage));
+        byte[] plaintext = null;
+
+        try {
+            plaintext = Crypto.runRsa(Cipher.DECRYPT_MODE, privKey, response.getBytes());
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        } catch (IllegalBlockSizeException e) {
+            e.printStackTrace();
+        } catch (BadPaddingException e) {
+            e.printStackTrace();
+        }
+
+        String decodedResponse = new String(plaintext);
+
+        //!ok <client-challenge> <controller-challenge> <secret-key> <iv-parameter>
+        String[] challengeResponse = decodedResponse.split(" ");
+
+        if(challengeResponse[1].equals(new String(clientChallenge64))) ;  //continue
+        else return "Authentication failed, server responded with wrong Client Challenge Random Number"; //end
+
+        String ivParameter = challengeResponse[4]; //base64 encoded!
+
+        byte[] secKey = Base64.decode(challengeResponse[3].getBytes());
+        this.SECRET_KEY = new SecretKeySpec(secKey, "AES");
+        this.IV = new IvParameterSpec(Base64.decode(ivParameter.getBytes()));
+
+        String controllerChallenge = challengeResponse[2];
+
+        this.authenticated = true;
+        return makeRequest(controllerChallenge);
+    }
+
+    @Override
+    @Command
     public String logout() throws IOException {
+        if(!authenticated) return "Sie müssen sich zuerst authentifizieren!";
+
+        String response = makeRequest("logout");
+
+        authenticated = false;
+        SECRET_KEY = null;
+        IV = null;
 
         loggedInUser = null;
-        return makeRequest("logout");
+        return response;
     }
 
     @Override
     @Command
     public String credits() throws IOException {
+        if(!authenticated) return "Sie müssen sich zuerst authentifizieren!";
 
         return makeRequest("credits");
     }
@@ -174,6 +315,7 @@ public class Client implements IClientCli, Runnable {
     @Override
     @Command
     public String buy(long credits) throws IOException {
+        if(!authenticated) return "Sie müssen sich zuerst authentifizieren!";
 
         return makeRequest("buy " + credits);
     }
@@ -181,6 +323,7 @@ public class Client implements IClientCli, Runnable {
     @Override
     @Command
     public String list() throws IOException {
+        if(!authenticated) return "Sie müssen sich zuerst authentifizieren!";
 
         return makeRequest("list");
     }
@@ -188,6 +331,7 @@ public class Client implements IClientCli, Runnable {
     @Override
     @Command
     public String compute(String term) throws IOException {
+        if(!authenticated) return "Sie müssen sich zuerst authentifizieren!";
 
         return makeRequest("compute " + term);
     }
@@ -223,15 +367,6 @@ public class Client implements IClientCli, Runnable {
         //Client client = new Client(args[0], new Config("client"), System.in, System.out);
         Client client = new Client("client", new Config("client"), System.in, System.out);
         client.run();
-    }
-
-    // --- Commands needed for Lab 2. Please note that you do not have to
-    // implement them for the first submission. ---
-
-    @Override
-    public String authenticate(String username) throws IOException {
-        // TODO Auto-generated method stub
-        return null;
     }
 
 }

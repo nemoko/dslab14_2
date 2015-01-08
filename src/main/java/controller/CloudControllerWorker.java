@@ -3,17 +3,28 @@ package controller;
 import admin.Subscribtion;
 import client.ClientInfo;
 import node.NodeInfo;
+import security.Cryptography;
 import org.bouncycastle.util.encoders.Base64;
 import util.Config;
 import util.Keys;
 
 import javax.crypto.Mac;
 import java.io.*;
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.Socket;
 import java.security.InvalidKeyException;
 import java.security.Key;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.*;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -24,6 +35,11 @@ import java.util.Date;
 public class CloudControllerWorker implements Runnable {
 
     private Config config;
+    private Config configCC;
+    private Cryptography Crypto;
+    private SecretKey SECRET_KEY = null;
+    private IvParameterSpec IV = null; 
+    private boolean authenticated;
 
     private Socket socket;
 
@@ -46,6 +62,7 @@ public class CloudControllerWorker implements Runnable {
         this.socket = socket;
         this.cloudController = cloudController;
         this.hmacFile = hmacFile;
+        this.authenticated = false;
 
         try {
             in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
@@ -66,60 +83,97 @@ public class CloudControllerWorker implements Runnable {
         }
 
         this.config = new Config("user");
+        this.configCC = new Config("controller");
+
+        Crypto = new Cryptography(configCC);
     }
 
     @Override
     public void run() {
 
         try {
-            String received = null;
 
             do {
-                received = in.readLine();
+                String received = "";
+
+                do {
+                    received += in.readLine();
+                } while (in.ready());
 
                 if (Thread.currentThread().isInterrupted()) {
-                    out.println("Verbindung unterbrochen");
+                    if(authenticated) out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, "Verbindung unterbrochen".getBytes())));
+                    else out.println("Verbindung unterbrochen");
                     break;
                 }
+
+                /** RSA BLOCK */
+                if(!authenticated) {
+                    //System.out.println("RSA");
+                    PrivateKey privKey = Crypto.getPrivKey("controller");
+                    //TODO ked sa zavrie client, tu dostaneme bad padding exception
+                    byte[] plaintext = Crypto.runRsa(Cipher.DECRYPT_MODE, privKey, received.getBytes());
+                    received = new String(plaintext);
+                    //System.out.println("CC RECEIVED: " + new String(plaintext));
+
+                    if(!getType(received).equals("authenticate")) {
+                        out.println("Sie müssen sich zuerst authentifizieren!");
+                        System.out.println("REQUEST DENIED: AUTHENTICATE FIRST");
+                        continue;
+                    }
+                }
+                /** RSA END */
+
+                /** AES BLOCK */
+                else {
+                    //System.out.println("AES");
+                    byte[] plaintext = Crypto.runAes(Cipher.DECRYPT_MODE, SECRET_KEY, IV, received.getBytes());
+                    received = new String(plaintext);
+                    //System.out.println("CC RECEIVED: " + new String(plaintext));
+                }
+                /** AES END */
 
                 String type = getType(received);
 
                 if (type.equals("login")) {
-                    out.println(login(received.substring(type.length() + 1)));
+                    out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, login(received.substring(type.length() + 1)).getBytes())));
+                }
+                else if (type.equals("authenticate")) {
+                    out.println(authenticate(received.substring(type.length() + 1)));
                 }
                 else if (type.equals("logout")) {
-                    out.println(logout());
+                    out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, logout().getBytes())));
                 }
                 else if (type.equals("credits")) {
-                    out.println(credits());
+                    out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, credits().getBytes())));
                 }
                 else if (type.equals("buy")) {
                     Long credits = null;
                     try {
                         credits = Long.parseLong(received.substring(type.length() + 1));
                     } catch (Exception e){
-                        out.println("Nur Zahlen verwenden!");
+                        out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, "Nur Zahlen verwenden!".getBytes())));
                     }
-                    if(credits != null) out.println(buy(credits));
+                    if(credits != null) out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, buy(credits).getBytes())));
                 }
                 else if (type.equals("list")) {
-                    out.println(list());
+                    out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, list().getBytes())));
                 }
                 else if (type.equals("compute")) {
-                    out.println(compute(received.substring(type.length() + 1)));
+                    out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, compute(received.substring(type.length() + 1)).getBytes())));
                 }
                 else if (type.equals("exit")) {
-                    if(logedInUser == null ) out.println("Ende");
-                    else out.println("Client: " + logedInUser + " wurde beendet");
+                    if(logedInUser == null ) out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, "Ende".getBytes())));
+                    else out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, ("Client: " + logedInUser + " wurde beendet").getBytes())));
                     break;
                 }
                 else {
-                    out.println("Keine richtige Anfrage");
+                    out.println(new String(Crypto.runAes(Cipher.ENCRYPT_MODE, SECRET_KEY, IV, "Keine richtige Anfrage".getBytes())));
                 }
 
             } while (!Thread.currentThread().isInterrupted());
 
         } catch (Exception ex) {
+            //ex.printStackTrace(); //TODO YOLO?
             logoutClient();
         } finally {
             try {
@@ -188,6 +242,89 @@ public class CloudControllerWorker implements Runnable {
         return "Der Username oder das Passwort ist falsch!";
     }
 
+
+
+    public String authenticate(String input) throws IOException { //alice KF06ENB8WgaWFqQq38e80kXxr5Enp/0WFBTFZXkme5I=
+
+        String[] values = input.split(" ");
+
+        byte[] serverChallenge = Crypto.genSecRandom(32);
+        byte[] serverChallenge64 = Base64.encode(serverChallenge);
+
+        this.IV = Crypto.generateIV();
+        byte[] encodedIV = Base64.encode(IV.getIV());
+
+        try {
+            this.SECRET_KEY = Crypto.genAesKey();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        byte[] encodedSecRandom = Base64.encode(SECRET_KEY.getEncoded());
+
+        //!ok <client-challenge> <controller-challenge> <secret-key> <iv-parameter>
+        String response = "!ok " + values[1] + " " + new String(serverChallenge64) + " " + new String(encodedSecRandom) + " " + new String(encodedIV);
+
+        byte[] rsaResponse = null;
+        try {
+            //System.out.println("RESPONSE: " + response);
+            rsaResponse = Crypto.runRsa(Cipher.ENCRYPT_MODE, Crypto.getPubKey(values[0]), response.getBytes());
+
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        } catch (IllegalBlockSizeException e) {
+            e.printStackTrace();
+        } catch (BadPaddingException e) {
+            e.printStackTrace();
+        }
+
+        //send back rsaResponse
+        String clientResponse = respondToChallenge(new String(rsaResponse));
+        byte[] decodedResponse = null;
+
+        try {
+            decodedResponse = Crypto.runAes(Cipher.DECRYPT_MODE, SECRET_KEY, IV, clientResponse.getBytes());
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (InvalidAlgorithmParameterException e) {
+            e.printStackTrace();
+        } catch (IllegalBlockSizeException e) {
+            e.printStackTrace();
+        } catch (BadPaddingException e) {
+            e.printStackTrace();
+        }
+
+        //System.out.println("OK: Correct server challenge return, AES setup complete.");
+        authenticated = true;
+
+        if(decodedResponse.equals(serverChallenge64)) {
+            authenticated = true; //TODO why isnt decoded response = serverchallenge 64?
+            return null;
+        }
+        else return null; //TODO what if incorrect server challenge?
+        //TODO the null is encoded and returned as garbage, fix
+    }
+
+    public String respondToChallenge(String challengeResponse){
+
+        String response = "";
+
+        try {
+            if (socket != null && socket.isConnected()) {
+                out.println(challengeResponse);
+                response = in.readLine();
+            } else {
+                write("Es konnte keine Verbindung zu " + socket.getLocalPort() + " gemacht werden");
+            }
+        } catch (IOException err) {
+            write("Es konnte keine Verbindung zu " + socket.getLocalPort() + " gemacht werden");
+        }
+
+        if(response == null) return "";
+        return response;
+    }
+
     public String logout() {
         if (logedInUser == null) {
             return "Sie sind nicht eingeloggt!";
@@ -207,6 +344,10 @@ public class CloudControllerWorker implements Runnable {
                         client.setOnline(false);
                     }
                 }
+
+                authenticated = false;
+                SECRET_KEY = null;
+                IV = null;
 
                 write(logedInUser + " wurde ausgeloggt");
                 logedInUser = null;
