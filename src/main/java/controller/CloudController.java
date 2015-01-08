@@ -409,8 +409,8 @@ public class CloudController implements ICloudControllerCli, Runnable,
 	 *            component
 	 */
 	public static void main(String[] args) {
-		//CloudController cloudController = new CloudController(args[0], new Config("controller"), System.in, System.out);
-	    CloudController cloudController = new CloudController("CloudController", new Config("controller"), System.in, System.out);
+		CloudController cloudController = new CloudController(args[0], new Config("controller"), System.in, System.out);
+	    //CloudController cloudController = new CloudController("CloudController", new Config("controller"), System.in, System.out);
 
 		cloudController.run();
 	}

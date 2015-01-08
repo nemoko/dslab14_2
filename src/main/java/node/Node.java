@@ -376,8 +376,8 @@ public class Node implements INodeCli, Runnable {
      *            which also represents the name of the configuration
      */
     public static void main(String[] args) {
-        //Node node = new Node(args[0], new Config(args[0]), System.in, System.out);
-        Node node = new Node("node3", new Config("node3"), System.in, System.out);
+        Node node = new Node(args[0], new Config(args[0]), System.in, System.out);
+        //Node node = new Node("node3", new Config("node3"), System.in, System.out);
         node.run();
     }
 
